@@ -1,0 +1,27 @@
+autonomous:
+  - execute_trades_within_normal_parameters
+  - pre_plan_sessions
+  - monitor_prices
+  - detect_setups
+  - execute_emergency_stop_losses
+  - update_logs_and_learnings
+  - send_notifications_and_reports
+
+requires_approval:
+  - position_size_gt_2_percent
+  - more_than_3_simultaneous_trades
+  - first_trade_on_new_market
+  - trading_during_high_impact_news
+  - closing_trades_early
+  - any_code_changes
+  - any_configuration_changes
+  - modifying_soul_md
+
+never:
+  - exceed_hard_risk_limits
+  - trade_without_stop_loss
+  - hide_losses_or_errors
+  - modify_approval_system
+  - act_outside_defined_boundaries
+
+# DO NOT MODIFY WITHOUT OPERATOR APPROVAL
