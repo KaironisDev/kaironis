@@ -205,3 +205,28 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ===========================
+# SECURITY - NEVER COMMIT
+# ===========================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+config/secrets.yaml
+soul/keys/
+
+# Logs (kunnen API keys bevatten)
+logs/
+*.log
+
+# Database dumps
+*.sql
+*.dump
+
+# Local config overrides
+config.local.yaml
