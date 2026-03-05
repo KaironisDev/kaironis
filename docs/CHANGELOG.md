@@ -1,4 +1,49 @@
-# Kaironis — Changelog
+﻿# Kaironis — Changelog
+
+Elke significante wijziging wordt hier gedocumenteerd.
+Format: `[DATUM] - Beschrijving`
+
+---
+
+## [2026-03-05] - Telegram bot + CI/CD + CodeRabbit
+
+### CodeRabbit
+- Geintegreerd op GitHub repo (PRO trial)
+- Vanaf nu automatische code review op elke PR
+
+### CI/CD
+- Pipeline gefixed: pytest exit code 5 opgelost
+- Placeholder tests toegevoegd met risk limit sanity checks
+- PR #1: documentatie, PR #2: CI fix
+
+### Telegram Bot (PR #3 - in review)
+- src/orchestration/bot.py aangemaakt
+- Commando's: /start, /help, /status, /pause, /resume, /emergency
+- Security: operator_only decorator
+- Unit tests voor alle state transitions
+
+### Docker Productie
+- docker/Dockerfile aangemaakt
+- docker/docker-compose.prod.yaml — alle services + healthchecks
+- Prod: poorten alleen op localhost (security hardening)
+
+### VPS
+- Repo gecloned op prod VPS: /home/kaironis/kaironis/
+- .env aangemaakt op prod (chmod 600)
+- Data mappen aangemaakt: data/tct-pdfs/, logs/
+
+### Sandbox Verkenning
+- n8n: gezond, klaar voor integratie
+- tct-trading-mcp-server: n8n MCP server (jij had dit al opgezet)
+- Ollama: lokaal LLM beschikbaar
+- Alle 3 Kaironis services al 44u stabiel uptime
+
+### WinSCP
+- Gedownload voor SFTP toegang tot VPS
+- Sessie configuratie opgeslagen op Desktop
+
+---
+â€” Changelog
 
 Elke significante wijziging wordt hier gedocumenteerd.
 Format: `[DATUM] - Beschrijving`
@@ -7,8 +52,8 @@ Format: `[DATUM] - Beschrijving`
 
 ## [2026-03-05] - Documentatie setup
 
-- Aangemaakt: `docs/SETUP.md` — volledige herstelhandleiding
-- Aangemaakt: `docs/CHANGELOG.md` — dit bestand
+- Aangemaakt: `docs/SETUP.md` â€” volledige herstelhandleiding
+- Aangemaakt: `docs/CHANGELOG.md` â€” dit bestand
 - Aangemaakt: `docs/architecture/overview.md`
 - Aangemaakt: `docs/infrastructure/` structuur
 - Aangemaakt: `docs/runbooks/`
@@ -18,7 +63,7 @@ Format: `[DATUM] - Beschrijving`
 ## [2026-03-04] - Security hardening & Foundation
 
 ### VPS
-- SSH poort gewijzigd: 22 → 2847 (beide VPS servers)
+- SSH poort gewijzigd: 22 â†’ 2847 (beide VPS servers)
 - Root login geblokkeerd
 - Wachtwoord SSH geblokkeerd
 - Nieuwe `kaironis` sudo user aangemaakt
@@ -61,28 +106,28 @@ Format: `[DATUM] - Beschrijving`
 ### Repository
 - GitHub repo aangemaakt: `KaironisDev/kaironis`
 - Volledige mapstructuur aangemaakt per ONBOARDING.md:
-  - `soul/` — identiteitsdocumenten
-  - `src/` — broncode (core, memory, trading, orchestration)
-  - `tests/` — unit, integration, e2e
-  - `docker/` — Docker Compose bestanden
-  - `.github/workflows/` — CI/CD pipeline
+  - `soul/` â€” identiteitsdocumenten
+  - `src/` â€” broncode (core, memory, trading, orchestration)
+  - `tests/` â€” unit, integration, e2e
+  - `docker/` â€” Docker Compose bestanden
+  - `.github/workflows/` â€” CI/CD pipeline
 - Eerste commit en push naar main
 
 ### VPS Servers
 - Prod VPS (82.29.173.111) geconfigureerd:
   - Ubuntu 24.04, 32GB RAM, 387GB disk
-  - Docker 29.2.1 geïnstalleerd
+  - Docker 29.2.1 geÃ¯nstalleerd
   - UFW firewall actief
   - fail2ban actief
 - Sandbox VPS (72.61.167.71) geconfigureerd:
   - Ubuntu 24.04, 16GB RAM, 193GB disk
-  - Docker 29.2.1 geïnstalleerd
+  - Docker 29.2.1 geÃ¯nstalleerd
   - UFW firewall actief
   - fail2ban actief
 
 ### Lokaal
-- Python 3.11.9 geïnstalleerd
-- pykeepass geïnstalleerd
+- Python 3.11.9 geÃ¯nstalleerd
+- pykeepass geÃ¯nstalleerd
 - KeePass database aangemaakt: `Kaironis.kdbx`
 - SSH keys gegenereerd (kaironis_prod, kaironis_sandbox)
 
@@ -91,11 +136,12 @@ Format: `[DATUM] - Beschrijving`
 ## [2026-02-28] - Project kickoff
 
 ### Documenten ontvangen van Perry
-- `ONBOARDING.md` — project onboarding document
-- `SOUL.md` — Kaironis identiteit (v1.1.0)
-- `Kaironis_Architecture_Plan.docx` — architectuur document
+- `ONBOARDING.md` â€” project onboarding document
+- `SOUL.md` â€” Kaironis identiteit (v1.1.0)
+- `Kaironis_Architecture_Plan.docx` â€” architectuur document
 
 ### Eerste sessie
 - Project volledig doorgelezen en begrepen
 - Planning gemaakt voor implementatie
 - Besloten: foundation eerst, dan bouwen
+
