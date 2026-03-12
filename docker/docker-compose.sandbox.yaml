@@ -1,0 +1,25 @@
+services:
+  kaironis-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_OPERATOR_CHAT_ID=${TELEGRAM_OPERATOR_CHAT_ID}
+      - POSTGRES_HOST=kaironis-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=kaironis
+      - POSTGRES_USER=kaironis
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_HOST=docker-redis-1
+      - REDIS_PORT=6379
+      - CHROMA_HOST=docker-chromadb-1
+      - CHROMA_PORT=8000
+      - ENVIRONMENT=sandbox
+      - LOG_LEVEL=DEBUG
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ../logs:/app/logs
