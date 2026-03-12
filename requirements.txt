@@ -7,8 +7,12 @@ psycopg2-binary
 sqlalchemy==2.0
 redis
 
-# Vector DB
+# Vector DB & Embeddings
 chromadb
+sentence-transformers
+
+# SSH tunneling
+paramiko
 
 # Trading / Brokers
 # hyperliquid-python-sdk  # uncomment when ready
