@@ -1,6 +1,6 @@
 # Kaironis — Architectuur Overzicht
 
-**Laatste update:** 2026-03-05
+**Laatste update:** 2026-03-12
 
 ---
 
@@ -9,7 +9,7 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    PERRY (Operator)                   │
-│              Telegram → @KaironisBot                 │
+│    Telegram → @KaironisBot / @Kaironis_test_bot      │
 └──────────────────────┬──────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────┐
@@ -53,15 +53,15 @@
 |------|-------------|--------|
 | Language | Python 3.11+ | ✅ Geïnstalleerd |
 | Orchestration | n8n | ✅ Draait op sandbox |
-| Bot Framework | python-telegram-bot | 🔲 Te implementeren |
-| Vector DB | ChromaDB | ✅ Draait op sandbox |
+| Bot Framework | python-telegram-bot | ✅ @KaironisBot (prod) + @Kaironis_test_bot (sandbox) |
+| Vector DB | ChromaDB | ✅ Beide VPS — 1046 chunks prod, 1038+ sandbox |
 | State DB | PostgreSQL 15 | ✅ Draait op sandbox |
 | Cache | Redis 7 | ✅ Draait op sandbox |
 | Containers | Docker + Compose | ✅ Beide VPS |
 | CI/CD | GitHub Actions | 🔲 Pipeline aangemaakt, testen TODO |
 | Code Review | CodeRabbit | 🔲 Te integreren |
 | Reverse Proxy | Traefik | ✅ Draait op sandbox |
-| Lokaal LLM | Ollama | ✅ Draait op sandbox |
+| Lokaal LLM | Ollama (nomic-embed-text) | ✅ Prod én sandbox |
 
 ---
 
@@ -111,8 +111,8 @@ kaironis/
 
 | Fase | Beschrijving | Status |
 |------|-------------|--------|
-| 1 | Foundation — VPS, repo, CI/CD, Telegram bot | 🔄 Bezig |
-| 2 | Memory & Knowledge — ChromaDB, PDF processing | 🔲 |
+| 1 | Foundation — VPS, repo, CI/CD, Telegram bot | ✅ Klaar |
+| 2 | Memory & Knowledge — ChromaDB, PDF processing | ✅ Grotendeels klaar (kennisbank gevuld, 1038–1046 chunks) |
 | 3 | Trading Core — broker integraties, risk management | 🔲 |
 | 4 | Pre-planning & Orchestration | 🔲 |
 | 5 | Learning System | 🔲 |
