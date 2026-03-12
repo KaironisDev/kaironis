@@ -1,15 +1,14 @@
 # Core
 python-telegram-bot==21.0
-asyncio
 
 # Database
 psycopg2-binary
 sqlalchemy==2.0
 redis
 
-# Vector DB & Embeddings
-chromadb
-sentence-transformers
+# Vector DB & Embeddings (optioneel - zie requirements-ml.txt)
+# chromadb           # zware dependency, apart installeren
+# sentence-transformers  # zware dependency, apart installeren
 
 # SSH tunneling
 paramiko

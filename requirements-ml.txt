@@ -1,0 +1,4 @@
+# ML / Vector DB dependencies
+# Installeer apart op VPS: pip install -r requirements-ml.txt
+chromadb
+sentence-transformers
