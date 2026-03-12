@@ -230,3 +230,23 @@ logs/
 
 # Local config overrides
 config.local.yaml
+
+# Strategy docs (leven op VPS, niet in git)
+docs/strategy/lectures/*.pdf
+docs/strategy/reviews/*.pdf
+docs/strategy/reference/*.pdf
+docs/strategy/**/_debug_*.html
+docs/strategy/ingest_report.md
+
+# Temp scripts
+scripts/ingest_strategy_vps.py
+
+# Build artifacts
+*.pyc
+__pycache__/
+.pytest_cache/
+coverage.xml
+ci_log*
+make_pdf.py
+fix_ingest*.py
+fix_prod.py
