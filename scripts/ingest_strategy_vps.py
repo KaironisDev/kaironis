@@ -173,11 +173,16 @@ def determine_lecture_type(filepath: Path) -> str:
     return "other"
 
 
+EXCLUDE_FILES = {"ingest_report.md", "index.md"}
+
 def load_strategy_docs() -> List[Dict]:
     docs = []
     for md_file in sorted(DOCS_DIR.rglob("*.md")):
         try:
             text = md_file.read_text(encoding="utf-8")
+            if md_file.name in EXCLUDE_FILES:
+                logger.info("Overgeslagen (exclude): %s", md_file.name)
+                continue
             if not text.strip():
                 logger.warning("Leeg bestand overgeslagen: %s", md_file.name)
                 continue
