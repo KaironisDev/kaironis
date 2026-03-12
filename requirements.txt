@@ -1,14 +1,17 @@
 # Core
 python-telegram-bot==21.0
-asyncio
 
 # Database
 psycopg2-binary
 sqlalchemy==2.0
 redis
 
-# Vector DB
-chromadb
+# Vector DB & Embeddings (zware ML deps - apart op VPS: requirements-ml.txt)
+# chromadb
+# sentence-transformers
+
+# SSH tunneling
+paramiko
 
 # Trading / Brokers
 # hyperliquid-python-sdk  # uncomment when ready
