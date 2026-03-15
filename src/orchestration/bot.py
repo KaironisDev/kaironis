@@ -8,7 +8,8 @@ Commands:
     /pause      - Pauzeer autonome trading
     /resume     - Hervat autonome trading
     /emergency  - KILL SWITCH — stop alles onmiddellijk
-    /ask        - Query de TCT strategy knowledge base
+    /ask        - Query de TCT strategy knowledge base (ruwe chunks)
+    /explain    - RAG: stel een vraag, krijg een samenvatting via AI
     /note       - Sla een marktobservatie op
     /lesson     - Sla een les op
     /notes      - Toon de laatste 5 notities
@@ -58,7 +59,7 @@ agent_state = {
     "paused": False,
     "emergency_stop": False,
     "started_at": datetime.utcnow().isoformat(),
-    "version": "0.2.0",
+    "version": "0.3.0",
 }
 
 # Lazy-initialized ReflectionLog
@@ -316,6 +317,103 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # ─────────────────────────────────────────────
+# RAG — /explain
+# ─────────────────────────────────────────────
+
+OLLAMA_GENERATE_MODEL = os.getenv("OLLAMA_GENERATE_MODEL", "llama3.2:latest")
+
+@operator_only
+async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """RAG: stel een vraag, krijg een AI-samenvatting op basis van TCT docs."""
+    message_text = update.message.text or ""
+    parts = message_text.split(None, 1)
+    if len(parts) < 2 or not parts[1].strip():
+        await update.message.reply_text(
+            "🤖 Gebruik: `/explain [vraag]`\n\nVoorbeeld: `/explain wat is PO3 en hoe gebruik ik het?`",
+            parse_mode="Markdown",
+        )
+        return
+
+    question = parts[1].strip()
+    await update.message.chat.send_action("typing")
+
+    # Stap 1: Haal relevante chunks op uit ChromaDB
+    try:
+        from src.memory.knowledge_base import KnowledgeBase
+        kb = KnowledgeBase()
+        raw = kb.query_strategy(question, n_results=10)
+        chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
+        if not chunks:
+            chunks = raw[:5]
+    except Exception as e:
+        await update.message.reply_text(f"❌ ChromaDB fout: `{e}`", parse_mode="Markdown")
+        return
+
+    if not chunks:
+        await update.message.reply_text("🔍 Geen relevante informatie gevonden.")
+        return
+
+    # Stap 2: Bouw context op
+    context_parts = []
+    for i, r in enumerate(chunks, 1):
+        meta = r.get("metadata", {})
+        filename = meta.get("filename", "onbekend").replace(".md", "")
+        doc = r.get("document", "")
+        doc_lines = [l for l in doc.split("\n") if l.strip() and not l.strip().startswith("#")]
+        content = " ".join(doc_lines).strip()[:800]
+        if content:
+            context_parts.append(f"[Bron {i}: {filename}]\n{content}")
+
+    context_text = "\n\n".join(context_parts)
+
+    prompt = f"""Je bent Kaironis, een AI trading assistent gespecialiseerd in de TCT (Time-Cycle Trading) strategie.
+Beantwoord de volgende vraag op basis van de gegeven TCT documentatie. Wees concreet en praktisch.
+Antwoord in het Nederlands. Maximaal 400 woorden.
+
+VRAAG: {question}
+
+TCT DOCUMENTATIE:
+{context_text}
+
+ANTWOORD:"""
+
+    # Stap 3: Genereer antwoord via Ollama
+    await update.message.reply_text("⏳ Even nadenken op basis van de TCT docs...")
+    await update.message.chat.send_action("typing")
+
+    try:
+        ollama_host = OLLAMA_HOST
+        ollama_port = OLLAMA_PORT
+        resp = requests.post(
+            f"http://{ollama_host}:{ollama_port}/api/generate",
+            json={"model": OLLAMA_GENERATE_MODEL, "prompt": prompt, "stream": False},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        answer = resp.json().get("response", "").strip()
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ollama generatie fout: `{e}`", parse_mode="Markdown")
+        return
+
+    if not answer:
+        await update.message.reply_text("❌ Leeg antwoord van het model.")
+        return
+
+    # Stap 4: Stuur antwoord
+    sources = ", ".join(
+        set(r.get("metadata", {}).get("filename", "?").replace(".md", "") for r in chunks)
+    )
+    header = f"🤖 *{_escape_md(question)}*\n\n"
+    footer = f"\n\n_Bronnen: {_escape_md(sources)}_"
+
+    response = header + _escape_md(answer) + footer
+    if len(response) > 3900:
+        response = response[:3900] + "\n\n_[afgekapt]_"
+
+    await update.message.reply_text(response, parse_mode="Markdown")
+
+
+# ─────────────────────────────────────────────
 # Reflection Commands — /note, /lesson, /notes
 # ─────────────────────────────────────────────
 
@@ -515,6 +613,7 @@ def main() -> None:
 
     # Memory Query
     app.add_handler(CommandHandler("ask", cmd_ask))
+    app.add_handler(CommandHandler("explain", cmd_explain))
 
     # Reflection
     app.add_handler(CommandHandler("note", cmd_note))
