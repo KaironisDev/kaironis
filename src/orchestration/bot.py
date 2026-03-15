@@ -40,7 +40,17 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPERATOR_CHAT_ID = int(os.getenv("TELEGRAM_OPERATOR_CHAT_ID", "0"))
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# DATABASE_URL: gebruik directe URL of stel samen uit losse variabelen
+DATABASE_URL = os.getenv("DATABASE_URL") or (
+    "postgresql://{user}:{password}@{host}:{port}/{db}".format(
+        user=os.getenv("POSTGRES_USER", "kaironis"),
+        password=os.getenv("POSTGRES_PASSWORD", ""),
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=os.getenv("POSTGRES_PORT", "5432"),
+        db=os.getenv("POSTGRES_DB", "kaironis"),
+    )
+)
 
 # Agent state (in-memory voor nu, later via Redis)
 agent_state = {
