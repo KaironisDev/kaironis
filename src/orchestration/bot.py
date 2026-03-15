@@ -23,6 +23,7 @@ Architecture:
 
 import logging
 import os
+import requests
 from datetime import datetime
 
 from telegram import Update
