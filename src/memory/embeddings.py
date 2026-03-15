@@ -17,7 +17,9 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost")
+# Strip http(s):// prefix als aanwezig — we bouwen de URL zelf
+_raw_host = os.getenv("OLLAMA_HOST", "localhost")
+OLLAMA_HOST = _raw_host.replace("http://", "").replace("https://", "").split(":")[0]
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11435"))
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "nomic-embed-text")
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "30"))
