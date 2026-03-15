@@ -8,15 +8,17 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_OPERATOR_CHAT_ID=${TELEGRAM_OPERATOR_CHAT_ID}
-      - POSTGRES_HOST=kaironis-postgres
+      - POSTGRES_HOST=localhost
       - POSTGRES_PORT=5432
       - POSTGRES_DB=kaironis
       - POSTGRES_USER=kaironis
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - REDIS_HOST=docker-redis-1
+      - REDIS_HOST=localhost
       - REDIS_PORT=6379
-      - CHROMA_HOST=docker-chromadb-1
-      - CHROMA_PORT=8000
+      - CHROMADB_HOST=localhost
+      - CHROMADB_PORT=8000
+      - OLLAMA_HOST=http://localhost:11434
+      - OLLAMA_PORT=11434
       - ENVIRONMENT=sandbox
       - LOG_LEVEL=DEBUG
     network_mode: host
