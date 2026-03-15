@@ -42,6 +42,11 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPERATOR_CHAT_ID = int(os.getenv("TELEGRAM_OPERATOR_CHAT_ID", "0"))
 
+# Ollama config (strip http:// prefix als aanwezig)
+_ollama_raw = os.getenv("OLLAMA_HOST", "localhost")
+OLLAMA_HOST = _ollama_raw.replace("http://", "").replace("https://", "").split(":")[0]
+OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
+
 # DATABASE_URL: gebruik directe URL of stel samen uit losse variabelen
 DATABASE_URL = os.getenv("DATABASE_URL") or (
     "postgresql://{user}:{password}@{host}:{port}/{db}".format(
