@@ -281,18 +281,22 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         distance = result.get("distance", 1.0)
         relevance = max(0.0, 1.0 - distance)
 
-        source = meta.get("source", "onbekend")
+        # Metadata keys: filename, source_file, chunk_index
+        filename = meta.get("filename") or meta.get("source_file") or meta.get("source") or "onbekend"
+        # Strip pad prefix als aanwezig
+        filename = filename.split("/")[-1].replace(".md", "")
         chunk_idx = meta.get("chunk_index", "?")
 
-        # Begrens de chunk-tekst
-        max_chunk = 800
-        if len(doc) > max_chunk:
-            doc = doc[:max_chunk] + "…"
+        # Sla lege of enkel-header chunks over in de preview
+        doc_lines = [l for l in doc.split("\n") if l.strip() and not l.strip().startswith("#")]
+        doc_preview = " ".join(doc_lines)[:600] if doc_lines else doc[:600]
+        if len(doc_preview) == 600:
+            doc_preview += "…"
 
         lines.append(
-            f"*[{i}] {_escape_md(source)}* (chunk {chunk_idx}, "
-            f"relevantie: {relevance:.0%})\n"
-            f"{_escape_md(doc)}\n"
+            f"*[{i}] {_escape_md(filename)}* "
+            f"(chunk {chunk_idx}, relevantie: {relevance:.0%})\n"
+            f"{_escape_md(doc_preview)}\n"
         )
 
     response = "\n".join(lines)
