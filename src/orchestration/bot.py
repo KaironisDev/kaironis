@@ -255,7 +255,20 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from src.memory.knowledge_base import KnowledgeBase
         kb = KnowledgeBase()
-        results = kb.query_strategy(question, n_results=3)
+        # Haal meer results op zodat we lege/header chunks kunnen filteren
+        raw_results = kb.query_strategy(question, n_results=8)
+        # Filter chunks die alleen headers/separators bevatten
+        results = []
+        for r in raw_results:
+            doc = r.get("document", "")
+            real_lines = [l for l in doc.split("\n")
+                         if l.strip() and not l.strip().startswith("#") and l.strip() != "---"]
+            real_content = " ".join(real_lines).strip()
+            if len(real_content) > 80:  # minimaal 80 tekens echte content
+                r["_real_content"] = real_content
+                results.append(r)
+            if len(results) >= 3:
+                break
     except Exception as e:
         logger.error("KnowledgeBase query mislukt: %s", e)
         await update.message.reply_text(
@@ -287,11 +300,13 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         filename = filename.split("/")[-1].replace(".md", "")
         chunk_idx = meta.get("chunk_index", "?")
 
-        # Sla lege of enkel-header chunks over in de preview
-        doc_lines = [l for l in doc.split("\n") if l.strip() and not l.strip().startswith("#")]
-        doc_preview = " ".join(doc_lines)[:600] if doc_lines else doc[:600]
-        if len(doc_preview) == 600:
-            doc_preview += "…"
+        # Gebruik de voorgefilterde content
+        doc_preview = result.get("_real_content", "")
+        if not doc_preview:
+            doc_lines = [l for l in doc.split("\n") if l.strip() and not l.strip().startswith("#")]
+            doc_preview = " ".join(doc_lines)[:600] if doc_lines else doc[:600]
+        if len(doc_preview) > 600:
+            doc_preview = doc_preview[:600] + "…"
 
         lines.append(
             f"*[{i}] {_escape_md(filename)}* "
