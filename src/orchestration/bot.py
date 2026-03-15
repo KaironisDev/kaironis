@@ -255,7 +255,11 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from src.memory.knowledge_base import KnowledgeBase
         kb = KnowledgeBase()
-        results = kb.query_strategy(question, n_results=3)
+        # Haal meer op en filter chunk_index=0 (zijn vaak alleen headers)
+        raw = kb.query_strategy(question, n_results=10)
+        results = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:3]
+        if not results:  # fallback als alles chunk_index=0 is
+            results = raw[:3]
     except Exception as e:
         logger.error("KnowledgeBase query mislukt: %s", e)
         await update.message.reply_text(
