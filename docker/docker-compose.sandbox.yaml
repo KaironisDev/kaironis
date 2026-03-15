@@ -1,8 +1,6 @@
 services:
   kaironis-bot:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: kaironis-bot:latest
     env_file:
       - ../.env
     environment:
