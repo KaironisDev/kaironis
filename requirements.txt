@@ -19,6 +19,9 @@ paramiko
 # hyperliquid-python-sdk  # uncomment when ready
 # MetaTrader5             # uncomment when ready (Windows only)
 
+# HTTP client
+requests
+
 # Utils
 pyyaml
 python-dotenv

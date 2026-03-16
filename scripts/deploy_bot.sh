@@ -7,11 +7,14 @@
 #   ./scripts/deploy_bot.sh both
 #
 # Vereisten: SSH key in ~/.ssh/kaironis_sandbox en ~/.ssh/kaironis_prod
+#            Hostkeys van de servers moeten gepind zijn in ~/.ssh/known_hosts
+#            Bootstrap: ssh-keyscan -p 2847 <host> >> ~/.ssh/known_hosts
 
 set -euo pipefail
 
 TARGET="${1:-both}"
-BRANCH="feature/memory-query-and-reflection"
+# Gebruik de BRANCH env-var als die gezet is, anders de huidige git-branch
+BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 
 deploy_to() {
     local name="$1"
@@ -22,19 +25,21 @@ deploy_to() {
     echo ""
     echo "=== Deploying naar $name ($host:$port) ==="
 
-    ssh -i "$key" -p "$port" -o StrictHostKeyChecking=no kaironis@"$host" bash << 'REMOTE'
+    # Geen StrictHostKeyChecking=no — hostkey moet gepind zijn in known_hosts
+    ssh -i "$key" -p "$port" kaironis@"$host" bash << REMOTE
         set -euo pipefail
         cd /opt/kaironis || { echo "ERROR: /opt/kaironis niet gevonden"; exit 1; }
 
-        echo "[1/4] Git pull..."
+        echo "[1/3] Git pull ($BRANCH)..."
         git fetch origin
-        git checkout feature/memory-query-and-reflection
-        git pull origin feature/memory-query-and-reflection
+        git checkout "$BRANCH"
+        git pull origin "$BRANCH"
 
-        echo "[2/4] Dependencies installeren..."
-        pip install asyncpg --quiet 2>/dev/null || true
+        echo "[2/3] Docker image bouwen en deployen..."
+        docker compose -f docker/docker-compose.sandbox.yaml build --no-cache kaironis-bot
+        docker compose -f docker/docker-compose.sandbox.yaml up -d kaironis-bot
 
-        echo "[3/4] Database tabel aanmaken..."
+        echo "[3/3] Database tabel aanmaken..."
         python3 - << 'PYEOF'
 import asyncio, os, sys
 sys.path.insert(0, '/opt/kaironis')
@@ -53,18 +58,6 @@ async def main():
 asyncio.run(main())
 PYEOF
 
-        echo "[4/4] Bot herstarten..."
-        if command -v systemctl &>/dev/null && systemctl is-active --quiet kaironis-bot 2>/dev/null; then
-            sudo systemctl restart kaironis-bot
-            echo "kaironis-bot service herstart"
-        elif docker ps -q --filter name=kaironis-bot 2>/dev/null | grep -q .; then
-            docker restart kaironis-bot
-            echo "kaironis-bot container herstart"
-        else
-            echo "WARN: Geen bekende bot process gevonden om te herstarten"
-            echo "Herstart de bot handmatig"
-        fi
-
         echo "=== Deploy klaar ==="
 REMOTE
     echo "✅ $name deploy succesvol"
@@ -72,14 +65,14 @@ REMOTE
 
 case "$TARGET" in
     sandbox)
-        deploy_to "sandbox" "72.61.167.71" "2847" "~/.ssh/kaironis_sandbox"
+        deploy_to "sandbox" "72.61.167.71" "2847" "$HOME/.ssh/kaironis_sandbox"
         ;;
     prod)
-        deploy_to "prod" "82.29.173.111" "2847" "~/.ssh/kaironis_prod"
+        deploy_to "prod" "82.29.173.111" "2847" "$HOME/.ssh/kaironis_prod"
         ;;
     both)
-        deploy_to "sandbox" "72.61.167.71" "2847" "~/.ssh/kaironis_sandbox"
-        deploy_to "prod" "82.29.173.111" "2847" "~/.ssh/kaironis_prod"
+        deploy_to "sandbox" "72.61.167.71" "2847" "$HOME/.ssh/kaironis_sandbox"
+        deploy_to "prod" "82.29.173.111" "2847" "$HOME/.ssh/kaironis_prod"
         ;;
     *)
         echo "Gebruik: $0 [sandbox|prod|both]"

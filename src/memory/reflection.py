@@ -12,6 +12,7 @@ Example::
     hits = await log.search("NY open")
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS reflections (
     category VARCHAR(50) NOT NULL,
     content TEXT NOT NULL,
     metadata JSONB,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category);
 CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC);
@@ -59,13 +60,16 @@ class ReflectionLog:
     ) -> None:
         self._dsn = dsn
         self._pool: Optional[asyncpg.Pool] = pool
+        self._pool_init_lock = asyncio.Lock()
 
     async def _get_pool(self) -> asyncpg.Pool:
-        """Lazy initialisatie van de connection pool."""
+        """Lazy initialisatie van de connection pool (race-condition safe)."""
         if self._pool is None:
-            if not self._dsn:
-                raise ValueError("Geen DSN opgegeven voor ReflectionLog")
-            self._pool = await asyncpg.create_pool(self._dsn)
+            async with self._pool_init_lock:
+                if self._pool is None:
+                    if not self._dsn:
+                        raise ValueError("Geen DSN opgegeven voor ReflectionLog")
+                    self._pool = await asyncpg.create_pool(self._dsn)
         return self._pool
 
     async def initialize(self) -> None:
@@ -79,7 +83,7 @@ class ReflectionLog:
                     category VARCHAR(50) NOT NULL,
                     content TEXT NOT NULL,
                     metadata JSONB,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
             await conn.execute(

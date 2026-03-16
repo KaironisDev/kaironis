@@ -21,6 +21,7 @@ Architecture:
     - Memory via ChromaDB + PostgreSQL
 """
 
+import asyncio
 import logging
 import os
 import requests
@@ -48,15 +49,21 @@ _ollama_raw = os.getenv("OLLAMA_HOST", "localhost")
 OLLAMA_HOST = _ollama_raw.replace("http://", "").replace("https://", "").split(":")[0]
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
 
-# DATABASE_URL: gebruik directe URL of stel samen uit losse variabelen
+# DATABASE_URL: gebruik directe URL of stel samen uit losse variabelen.
+# Alleen als POSTGRES_HOST expliciet gezet is, anders blijft DATABASE_URL None
+# zodat _get_reflection_log() correct None teruggeeft en de handlers de
+# "DB niet geconfigureerd" melding tonen.
+_postgres_host = os.getenv("POSTGRES_HOST")
 DATABASE_URL = os.getenv("DATABASE_URL") or (
     "postgresql://{user}:{password}@{host}:{port}/{db}".format(
         user=os.getenv("POSTGRES_USER", "kaironis"),
         password=os.getenv("POSTGRES_PASSWORD", ""),
-        host=os.getenv("POSTGRES_HOST", "localhost"),
+        host=_postgres_host,
         port=os.getenv("POSTGRES_PORT", "5432"),
         db=os.getenv("POSTGRES_DB", "kaironis"),
     )
+    if _postgres_host
+    else None
 )
 
 # Agent state (in-memory voor nu, later via Redis)
@@ -394,7 +401,10 @@ ANTWOORD:"""
         return
 
     try:
-        resp = requests.post(
+        # asyncio.to_thread() voorkomt dat de blocking HTTP-call de event loop blokkeert.
+        # Zo kan /emergency ook reageren terwijl OpenRouter nadenkt.
+        resp = await asyncio.to_thread(
+            requests.post,
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -461,8 +471,6 @@ async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        # Initialiseer tabel als nodig
-        await reflection.initialize()
         record_id = await reflection.log_observation(
             category="market_observation",
             content=content,
@@ -504,7 +512,6 @@ async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     try:
-        await reflection.initialize()
         record_id = await reflection.log_observation(
             category="lesson_learned",
             content=content,
@@ -535,7 +542,6 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
-        await reflection.initialize()
         records = await reflection.get_recent(limit=5)
     except Exception as e:
         logger.error("Notes ophalen mislukt: %s", e)
@@ -611,6 +617,17 @@ def _escape_md(text: str) -> str:
 # Main
 # ─────────────────────────────────────────────
 
+async def _on_startup(app) -> None:
+    """Initialiseer services bij bot startup (vóór polling start)."""
+    reflection = _get_reflection_log()
+    if reflection is not None:
+        try:
+            await reflection.initialize()
+            logger.info("ReflectionLog schema geïnitialiseerd bij startup")
+        except Exception as e:
+            logger.warning("ReflectionLog initialisatie mislukt (DB down?): %s", e)
+
+
 def main() -> None:
     """Start de Telegram bot."""
     if not BOT_TOKEN:
@@ -621,7 +638,7 @@ def main() -> None:
 
     logger.info(f"Kaironis Bot v{agent_state['version']} wordt gestart...")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(_on_startup).build()
 
     # Commands registreren
     app.add_handler(CommandHandler("start", cmd_start))

@@ -1,6 +1,7 @@
 services:
   kaironis-bot:
-    image: kaironis-bot:latest
+    # Update deze tag bij elke release naar de nieuwe versie (bijv. 0.4.0)
+    image: kaironis-bot:0.3.0
     env_file:
       - ../.env
     environment:

@@ -1,44 +1,26 @@
 language: "nl"
 
+# Project context voor CodeRabbit reviews
+# Kaironis is een autonoom AI trading systeem gebouwd voor een ervaren trader (Perry) in Nederland.
+#
+# Wat Kaironis doet:
+# - Handelt op basis van de TCT (Time-Cycle Trading) strategie.
+# - Doel: 10%+ maandelijks rendement op Breakout Prop funded accounts.
+#
+# Architectuur:
+# - Telegram bot als operator interface (@KaironisBot prod, @Kaironis_test_bot sandbox)
+# - ChromaDB kennisbank, Ollama embeddings, OpenRouter RAG, PostgreSQL, Redis
+# - Twee VPS servers: prod (82.29.173.111) en sandbox (72.61.167.71)
+#
+# Kritieke principes:
+# - Veiligheid boven alles: autonome trading beslissingen moeten traceerbaar zijn
+# - Operator kan altijd ingrijpen: kill switch is heilig
+# - Geen silent failures: fouten kosten geld
+# - Secrets nooit in code: alles via environment variables
+# - Audit trail: elke trading actie moet gelogd zijn
+
 reviews:
   profile: "assertive"
-  overarching_instructions: |
-    Kaironis is een autonoom AI trading systeem gebouwd voor een ervaren trader (Perry) in Nederland.
-    
-    ## Wat Kaironis doet
-    - Handelt op basis van de TCT (Time-Cycle Trading) strategie — een discretionaire strategie 
-      gebaseerd op time cycles, supply/demand zones, liquiditeit en PO3 (Potential Order Opportunity) schematics.
-    - Doel: 10%+ maandelijks rendement op Breakout Prop funded accounts.
-    - Perry streamt dagelijks: pre-planning sessie + live executie. Kaironis ondersteunt beide.
-    
-    ## Architectuur
-    - Telegram bot als operator interface (@KaironisBot prod, @Kaironis_test_bot sandbox)
-    - ChromaDB kennisbank met 1000+ chunks uit TCT strategy documenten
-    - Embeddings via Ollama (nomic-embed-text, 768 dim)
-    - /explain RAG via OpenRouter (Gemini 2.0 Flash)
-    - PostgreSQL voor state + reflection logs
-    - Redis voor caching
-    - Twee VPS servers: prod (82.29.173.111) en sandbox (72.61.167.71)
-    
-    ## Fase status
-    - Fase 1 ✅: Infrastructure (VPS, repo, CI, bots)
-    - Fase 2 ✅: Memory & Knowledge (ChromaDB, /ask, /explain RAG)
-    - Fase 3 🔲: Trading core (broker integratie, risk management, agent loop)
-    - Fase 4 🔲: Pre-planning & orchestration
-    - Fase 5 🔲: Learning system
-    - Fase 6 🔲: Live trading validatie
-    
-    ## Kritieke principes
-    - **Veiligheid boven alles**: autonome trading beslissingen moeten altijd traceerbaar zijn
-    - **Operator kan altijd ingrijpen**: kill switch is heilig
-    - **Geen silent failures**: fouten in een trading context kosten geld
-    - **Secrets nooit in code**: alles via environment variables
-    - **Audit trail**: elke trading actie moet gelogd zijn
-    
-    ## Tech stack
-    - Python 3.11, python-telegram-bot 21, asyncpg, chromadb, requests
-    - Docker + Compose op Ubuntu 24.04
-    - GitHub Actions CI, CodeRabbit review verplicht voor merge
   request_changes_workflow: true
   high_level_summary: true
   poem: false
