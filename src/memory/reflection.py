@@ -254,7 +254,9 @@ class ReflectionLog:
                 pattern,
             )
 
-        logger.debug("Search '%s': %d resultaten", query, len(rows))
+        # Log geanonimiseerde query (eerste 4 tekens + "...") om reflection-data niet te lekken
+        masked_query = query[:4] + "..." if len(query) > 4 else "***"
+        logger.debug("Search '%s' (len=%d): %d resultaten", masked_query, len(query), len(rows))
         return [_row_to_dict(row) for row in rows]
 
 

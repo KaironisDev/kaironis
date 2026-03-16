@@ -511,15 +511,12 @@ async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
+    # Sla op en bevestig afzonderlijk zodat DB-fouten en reply-fouten niet worden vermengd
     try:
         record_id = await reflection.log_observation(
             category="market_observation",
             content=content,
             metadata={"telegram_user": update.effective_user.id},
-        )
-        await update.message.reply_text(
-            f"✅ Observatie opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
-            parse_mode="Markdown",
         )
     except Exception as e:
         logger.error("Note opslaan mislukt: %s", e)
@@ -527,6 +524,15 @@ async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"❌ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
+        return
+
+    try:
+        await update.message.reply_text(
+            f"✅ Observatie opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error("Reply sturen voor note (id=%d) mislukt: %s", record_id, e)
 
 
 @operator_only
@@ -552,15 +558,12 @@ async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
+    # Sla op en bevestig afzonderlijk zodat DB-fouten en reply-fouten niet worden vermengd
     try:
         record_id = await reflection.log_observation(
             category="lesson_learned",
             content=content,
             metadata={"telegram_user": update.effective_user.id},
-        )
-        await update.message.reply_text(
-            f"🎓 Lesson learned opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
-            parse_mode="Markdown",
         )
     except Exception as e:
         logger.error("Lesson opslaan mislukt: %s", e)
@@ -568,6 +571,15 @@ async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"❌ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
+        return
+
+    try:
+        await update.message.reply_text(
+            f"🎓 Lesson learned opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error("Reply sturen voor lesson (id=%d) mislukt: %s", record_id, e)
 
 
 @operator_only
