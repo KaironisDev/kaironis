@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import asyncpg
 
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS reflections (
     category VARCHAR(50) NOT NULL,
     content TEXT NOT NULL,
     metadata JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category);
 CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC);
@@ -100,7 +100,7 @@ class ReflectionLog:
         self,
         category: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> int:
         """
         Sla een observatie of learning op.
@@ -155,7 +155,7 @@ class ReflectionLog:
         self,
         limit: int = 10,
         category: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Haal de meest recente observaties op.
 
@@ -203,7 +203,7 @@ class ReflectionLog:
 
         return [_row_to_dict(row) for row in rows]
 
-    async def search(self, query: str) -> List[Dict[str, Any]]:
+    async def search(self, query: str) -> list[dict[str, Any]]:
         """
         Full-text zoeken in PostgreSQL via ILIKE (portable, geen tsvector setup nodig).
 
@@ -241,7 +241,7 @@ class ReflectionLog:
 # Helpers
 # ─────────────────────────────────────────────
 
-def _row_to_dict(row: asyncpg.Record) -> Dict[str, Any]:
+def _row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
     """Converteer een asyncpg Record naar een plain dict."""
     metadata = row["metadata"]
     if isinstance(metadata, str):
