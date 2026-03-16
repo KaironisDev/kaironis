@@ -140,6 +140,14 @@ class KnowledgeBase:
                 category = _detect_category(rel_path)
 
                 for chunk_idx, chunk in enumerate(chunks):
+                    # Skip header-only chunks: kort (<150 tekens) én geen zin (geen punt/komma/dubbele punt)
+                    if chunk_idx == 0 and len(chunk) < 150 and not any(c in chunk for c in (".", ",", ":")):
+                        logger.debug(
+                            "Chunk 0 van %s overgeslagen (header/bestandsnaam detectie, %d tekens)",
+                            rel_path, len(chunk),
+                        )
+                        continue
+
                     chunk_id = f"{rel_path}::{chunk_idx}"
                     meta: Dict[str, Any] = {
                         "source": rel_path,
