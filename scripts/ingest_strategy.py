@@ -362,6 +362,14 @@ def ingest_docs(collection, docs: List[Dict]) -> Dict:
                 if not chunk_text.strip():
                     continue
 
+                # Skip header-only chunks: kort (<150 tekens) én geen zin (geen punt/komma/dubbele punt)
+                if chunk_idx == 0 and len(chunk_text) < 150 and not any(c in chunk_text for c in (".", ",", ":")):
+                    logger.debug(
+                        "Chunk 0 van %s overgeslagen (header/bestandsnaam detectie, %d tekens)",
+                        filename, len(chunk_text),
+                    )
+                    continue
+
                 try:
                     embedding = get_embedding(chunk_text)
                 except Exception as e:

@@ -8,6 +8,8 @@ Commands:
     /pause    - Pauzeer autonome trading
     /resume   - Hervat autonome trading
     /emergency - KILL SWITCH — stop alles onmiddellijk
+    /ask      - Stel een vraag aan de TCT knowledge base
+    /explain  - Laat Kaironis een concept uitleggen via OpenRouter
 
 Architecture:
     - Async via python-telegram-bot v21
@@ -19,8 +21,11 @@ import logging
 import os
 from datetime import datetime
 
+import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+
+from src.memory.knowledge_base import KnowledgeBase
 
 # Structured logging
 logging.basicConfig(
@@ -181,6 +186,88 @@ async def cmd_emergency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 # ─────────────────────────────────────────────
+# Knowledge base & AI commands
+# ─────────────────────────────────────────────
+
+@operator_only
+async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Stel een vraag aan de TCT strategy knowledge base."""
+    question = " ".join(context.args) if context.args else ""
+    if not question.strip():
+        await update.message.reply_text(
+            "❓ Gebruik: /ask <vraag>\nBijvoorbeeld: /ask Wat is een PO3 schematic?"
+        )
+        return
+
+    await update.message.reply_text("🔍 Zoeken in TCT knowledge base…")
+    try:
+        kb = KnowledgeBase()
+        results = kb.query_strategy(question, n_results=3)
+        if not results:
+            await update.message.reply_text("Geen relevante informatie gevonden.")
+            return
+
+        lines = [f"📚 *Antwoord op:* _{question}_\n"]
+        for i, r in enumerate(results, 1):
+            doc = r.get("document", "")[:500]
+            source = r.get("metadata", {}).get("source", "onbekend")
+            lines.append(f"*[{i}] {source}*\n{doc}\n")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("Fout bij /ask: %s", exc)
+        await update.message.reply_text(f"❌ Fout bij ophalen: {exc}")
+
+
+@operator_only
+async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Laat Kaironis een TCT concept uitleggen via OpenRouter."""
+    concept = " ".join(context.args) if context.args else ""
+    if not concept.strip():
+        await update.message.reply_text(
+            "❓ Gebruik: /explain <concept>\nBijvoorbeeld: /explain liquidity sweep"
+        )
+        return
+
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    if not openrouter_key:
+        await update.message.reply_text("❌ OPENROUTER_API_KEY niet ingesteld.")
+        return
+
+    await update.message.reply_text(f"🤔 Uitleg genereren voor: _{concept}_…", parse_mode="Markdown")
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {openrouter_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "anthropic/claude-3-haiku",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Je bent Kaironis, een AI trading assistent gespecialiseerd in "
+                            "TCT (Time-Cycle Trading). Geef heldere, beknopte uitleg over "
+                            "TCT concepten. Maximaal 300 woorden."
+                        ),
+                    },
+                    {"role": "user", "content": f"Leg uit: {concept}"},
+                ],
+                "max_tokens": 400,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        answer = response.json()["choices"][0]["message"]["content"]
+        await update.message.reply_text(f"💡 *{concept}*\n\n{answer}", parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("Fout bij /explain: %s", exc)
+        await update.message.reply_text(f"❌ OpenRouter fout: {exc}")
+
+
+# ─────────────────────────────────────────────
 # Unknown command handler
 # ─────────────────────────────────────────────
 
@@ -189,6 +276,23 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(
         "❓ Onbekend commando. Gebruik /help voor een overzicht."
     )
+
+
+# ─────────────────────────────────────────────
+# Global error handler
+# ─────────────────────────────────────────────
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Vangt alle onverwachte fouten op en logt ze. Stuurt melding naar de operator."""
+    logger.error("Onverwachte fout: %s", context.error, exc_info=context.error)
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"❌ Onverwachte fout: {type(context.error).__name__}. Ik heb het gelogd.",
+            )
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────
@@ -214,6 +318,11 @@ def main() -> None:
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("emergency", cmd_emergency))
+    app.add_handler(CommandHandler("ask", cmd_ask))
+    app.add_handler(CommandHandler("explain", cmd_explain))
+
+    # Global error handler
+    app.add_error_handler(error_handler)
 
     logger.info("Bot gestart. Wachten op berichten...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
