@@ -21,3 +21,6 @@ paramiko
 pyyaml
 python-dotenv
 structlog
+
+# PDF to image conversion
+pdf2image
