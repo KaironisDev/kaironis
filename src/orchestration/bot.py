@@ -76,17 +76,27 @@ agent_state = {
     "version": "0.3.0",
 }
 
-# Lazy-initialized ReflectionLog
+# Lazy-initialized singletons — shared across all command handlers
 _reflection_log = None
+_knowledge_base = None
 
 
 def _get_reflection_log():
-    """Lazy initialisatie van de ReflectionLog."""
+    """Lazy-initialize the ReflectionLog singleton."""
     global _reflection_log
     if _reflection_log is None and DATABASE_URL:
         from src.memory.reflection import ReflectionLog
         _reflection_log = ReflectionLog(dsn=DATABASE_URL)
     return _reflection_log
+
+
+def _get_knowledge_base():
+    """Lazy-initialize the KnowledgeBase singleton. Avoids per-command re-init overhead."""
+    global _knowledge_base
+    if _knowledge_base is None:
+        from src.memory.knowledge_base import KnowledgeBase
+        _knowledge_base = KnowledgeBase()
+    return _knowledge_base
 
 
 # ─────────────────────────────────────────────
@@ -163,14 +173,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     chroma_status = "❓ Niet gecheckt"
     chroma_count = ""
     try:
-        from src.memory.knowledge_base import KnowledgeBase
-        kb = KnowledgeBase()
+        kb = _get_knowledge_base()
         stats = await asyncio.to_thread(kb.get_stats)
         count = stats.get("document_count", 0)
         chroma_status = "✅ Bereikbaar"
         chroma_count = f"\n*Chunks in collection:* {count}"
     except Exception as e:
-        chroma_status = f"❌ Niet bereikbaar ({type(e).__name__})"
+        chroma_status = f"❌ Niet bereikbaar ({_escape_md(type(e).__name__)})"
         logger.warning("ChromaDB status check mislukt: %s", e)
 
     message = (
@@ -268,8 +277,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.chat.send_action("typing")
 
     try:
-        from src.memory.knowledge_base import KnowledgeBase
-        kb = KnowledgeBase()
+        kb = _get_knowledge_base()
         # Fetch more and filter chunk_index=0 (often header-only chunks)
         raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         results = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:3]
@@ -278,7 +286,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error("KnowledgeBase query failed: %s", e)
         await update.message.reply_text(
-            f"❌ Fout bij query naar knowledge base: `{type(e).__name__}: {e}`",
+            f"❌ Fout bij query naar knowledge base: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
         return
@@ -355,14 +363,16 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     # Step 1: Retrieve relevant chunks from ChromaDB
     try:
-        from src.memory.knowledge_base import KnowledgeBase
-        kb = KnowledgeBase()
+        kb = _get_knowledge_base()
         raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
         if not chunks:
             chunks = raw[:5]
     except Exception as e:
-        await update.message.reply_text(f"❌ ChromaDB fout: `{e}`", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"❌ ChromaDB fout: `{_escape_md(type(e).__name__)}`",
+            parse_mode="Markdown",
+        )
         return
 
     if not chunks:
@@ -484,7 +494,7 @@ async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error("Note opslaan mislukt: %s", e)
         await update.message.reply_text(
-            f"❌ Fout bij opslaan: `{type(e).__name__}: {e}`",
+            f"❌ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
 
@@ -525,7 +535,7 @@ async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as e:
         logger.error("Lesson opslaan mislukt: %s", e)
         await update.message.reply_text(
-            f"❌ Fout bij opslaan: `{type(e).__name__}: {e}`",
+            f"❌ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
 
@@ -547,7 +557,7 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error("Notes ophalen mislukt: %s", e)
         await update.message.reply_text(
-            f"❌ Fout bij ophalen notities: `{type(e).__name__}: {e}`",
+            f"❌ Fout bij ophalen notities: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
         return

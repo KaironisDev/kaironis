@@ -157,12 +157,18 @@ class ReflectionLog:
         Haal de meest recente observaties op.
 
         Args:
-            limit: Maximum aantal records (default: 10).
+            limit: Maximum aantal records (default: 10). Must be >= 1.
             category: Filter op categorie (optioneel).
 
         Returns:
             Lijst van dicts met id, category, content, metadata, created_at.
+
+        Raises:
+            ValueError: As limit < 1.
         """
+        if limit < 1:
+            raise ValueError(f"limit must be >= 1, got {limit}")
+
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             if category:
