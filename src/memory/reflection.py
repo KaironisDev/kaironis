@@ -2,7 +2,7 @@
 Reflection & Learning System voor Kaironis.
 
 Slaat trade observaties, learnings en strategie-notities op in PostgreSQL.
-Full-text search via PostgreSQL ts_vector.
+De search() methode gebruikt case-insensitive ILIKE-matching (substring zoeken).
 
 Example::
 
@@ -30,17 +30,23 @@ VALID_CATEGORIES = frozenset([
     "strategy_note",
 ])
 
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS reflections (
-    id SERIAL PRIMARY KEY,
-    category VARCHAR(50) NOT NULL,
-    content TEXT NOT NULL,
-    metadata JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category);
-CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC);
-"""
+# DDL statements als expliciete tuple — vermijdt fragiel split(";") op embedded puntkomma's
+CREATE_TABLE_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS reflections (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        metadata JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category)",
+    "CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC)",
+)
+
+# Maximum aantal records dat get_recent() mag teruggeven
+MAX_LIMIT = 1000
 
 
 class ReflectionLog:
@@ -79,8 +85,7 @@ class ReflectionLog:
         """Maak de tabel en indices aan als ze nog niet bestaan."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            # Voer statements uit CREATE_TABLE_SQL afzonderlijk uit
-            for statement in CREATE_TABLE_SQL.strip().split(";"):
+            for statement in CREATE_TABLE_STATEMENTS:
                 stmt = statement.strip()
                 if stmt:
                     await conn.execute(stmt)
@@ -160,14 +165,17 @@ class ReflectionLog:
         Haal de meest recente observaties op.
 
         Args:
-            limit: Maximum aantal records (default: 10). Must be >= 1.
-            category: Filter op categorie (optioneel).
+            limit: Maximum aantal records (default: 10). Must be >= 1 and <= MAX_LIMIT.
+            category: Filter op categorie (optioneel). Moet een van VALID_CATEGORIES zijn.
 
         Returns:
             Lijst van dicts met id, category, content, metadata, created_at.
 
         Raises:
-            ValueError: As limit < 1.
+            TypeError: Als limit geen integer is (of een bool).
+            ValueError: Als limit buiten het bereik [1, MAX_LIMIT] valt.
+            TypeError: Als category geen string is.
+            ValueError: Als category niet in VALID_CATEGORIES zit.
         """
         if not isinstance(limit, int) or isinstance(limit, bool):
             raise TypeError(
@@ -175,6 +183,19 @@ class ReflectionLog:
             )
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
+        if limit > MAX_LIMIT:
+            raise ValueError(f"limit must be <= {MAX_LIMIT}, got {limit}")
+
+        if category is not None:
+            if not isinstance(category, str):
+                raise TypeError(
+                    f"category must be a string, got {type(category).__name__!r}"
+                )
+            if category not in VALID_CATEGORIES:
+                raise ValueError(
+                    f"Ongeldige categorie '{category}'. "
+                    f"Gebruik een van: {', '.join(sorted(VALID_CATEGORIES))}"
+                )
 
         pool = await self._get_pool()
         async with pool.acquire() as conn:

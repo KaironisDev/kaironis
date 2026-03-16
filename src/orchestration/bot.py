@@ -295,8 +295,9 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Fetch more and filter chunk_index=0 (often header-only chunks)
         raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         results = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:3]
-        if not results:  # fallback if everything is chunk_index=0
-            results = raw[:3]
+        # Fallback: also filter on chunk_index to avoid reintroducing header-only chunks
+        if not results:
+            results = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:3]
     except Exception as e:
         logger.error("KnowledgeBase query failed: %s", e)
         await update.message.reply_text(
@@ -380,8 +381,9 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         kb = _get_knowledge_base()
         raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
+        # Fallback: keep chunk_index filter to avoid reintroducing header-only chunks
         if not chunks:
-            chunks = raw[:5]
+            chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
     except Exception as e:
         await update.message.reply_text(
             f"❌ ChromaDB fout: `{_escape_md(type(e).__name__)}`",
@@ -606,10 +608,14 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for rec in records:
         emoji = category_emoji.get(rec["category"], "📝")
         cat = rec["category"].replace("_", " ").title()
-        # Datum afkappen tot datum+tijd
+        # Timestamp: parse ISO8601 volledig (timezone-aware) en formatteer leesbaar
         ts = rec["created_at"]
         if isinstance(ts, str) and "T" in ts:
-            ts = ts[:16].replace("T", " ")
+            try:
+                dt = datetime.fromisoformat(ts)
+                ts = dt.strftime("%Y-%m-%d %H:%M %Z").strip() or dt.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                ts = ts[:16].replace("T", " ")
         content = rec["content"]
         if len(content) > 200:
             content = content[:200] + "…"
