@@ -49,8 +49,12 @@ _raw_operator_id = os.getenv("TELEGRAM_OPERATOR_CHAT_ID", "0")
 try:
     OPERATOR_CHAT_ID = int(_raw_operator_id)
 except ValueError:
-    raise ValueError(
-        f"TELEGRAM_OPERATOR_CHAT_ID moet een integer zijn, kreeg: {_raw_operator_id!r}"
+    logger.critical(
+        "TELEGRAM_OPERATOR_CHAT_ID moet een integer zijn, kreeg: %r — bot kan niet starten.",
+        _raw_operator_id,
+    )
+    sys.exit(
+        f"Fout: TELEGRAM_OPERATOR_CHAT_ID moet een integer zijn, kreeg: {_raw_operator_id!r}"
     )
 
 # Ollama config (strip http:// prefix als aanwezig)
