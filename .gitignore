@@ -237,6 +237,8 @@ docs/strategy/reviews/*.pdf
 docs/strategy/reference/*.pdf
 docs/strategy/**/_debug_*.html
 docs/strategy/ingest_report.md
+docs/strategy/images/
+docs/strategy/image_ingest_report.md
 
 # Temp scripts
 scripts/ingest_strategy_vps.py

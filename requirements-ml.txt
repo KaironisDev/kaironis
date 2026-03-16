@@ -2,3 +2,6 @@
 # Installeer apart op VPS: pip install -r requirements-ml.txt
 chromadb
 sentence-transformers
+
+# PDF to image conversion (vereist ook poppler op het systeem)
+pdf2image
