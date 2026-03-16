@@ -26,6 +26,7 @@ import logging
 import os
 import requests
 from datetime import datetime, timezone
+from urllib.parse import quote_plus
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -56,8 +57,8 @@ OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
 _postgres_host = os.getenv("POSTGRES_HOST")
 DATABASE_URL = os.getenv("DATABASE_URL") or (
     "postgresql://{user}:{password}@{host}:{port}/{db}".format(
-        user=os.getenv("POSTGRES_USER", "kaironis"),
-        password=os.getenv("POSTGRES_PASSWORD", ""),
+        user=quote_plus(os.getenv("POSTGRES_USER", "kaironis")),
+        password=quote_plus(os.getenv("POSTGRES_PASSWORD", "")),
         host=_postgres_host,
         port=os.getenv("POSTGRES_PORT", "5432"),
         db=os.getenv("POSTGRES_DB", "kaironis"),
@@ -164,7 +165,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         from src.memory.knowledge_base import KnowledgeBase
         kb = KnowledgeBase()
-        stats = kb.get_stats()
+        stats = await asyncio.to_thread(kb.get_stats)
         count = stats.get("document_count", 0)
         chroma_status = "✅ Bereikbaar"
         chroma_count = f"\n*Chunks in collection:* {count}"
@@ -269,13 +270,13 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         from src.memory.knowledge_base import KnowledgeBase
         kb = KnowledgeBase()
-        # Haal meer op en filter chunk_index=0 (zijn vaak alleen headers)
-        raw = kb.query_strategy(question, n_results=10)
+        # Fetch more and filter chunk_index=0 (often header-only chunks)
+        raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         results = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:3]
-        if not results:  # fallback als alles chunk_index=0 is
+        if not results:  # fallback if everything is chunk_index=0
             results = raw[:3]
     except Exception as e:
-        logger.error("KnowledgeBase query mislukt: %s", e)
+        logger.error("KnowledgeBase query failed: %s", e)
         await update.message.reply_text(
             f"❌ Fout bij query naar knowledge base: `{type(e).__name__}: {e}`",
             parse_mode="Markdown",
@@ -305,9 +306,9 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         filename = filename.split("/")[-1].replace(".md", "")
         chunk_idx = meta.get("chunk_index", "?")
 
-        # Toon echte content — filter headers maar val terug op volledige tekst
-        doc_lines = [l for l in doc.split("\n")
-                     if l.strip() and not l.strip().startswith("#") and l.strip() != "---"]
+        # Show real content — filter headers but fall back to full text
+        doc_lines = [line for line in doc.split("\n")
+                     if line.strip() and not line.strip().startswith("#") and line.strip() != "---"]
         doc_preview = " ".join(doc_lines).strip() if doc_lines else doc.strip()
         if not doc_preview:
             doc_preview = doc.strip()
@@ -352,11 +353,11 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     question = parts[1].strip()
     await update.message.chat.send_action("typing")
 
-    # Stap 1: Haal relevante chunks op uit ChromaDB
+    # Step 1: Retrieve relevant chunks from ChromaDB
     try:
         from src.memory.knowledge_base import KnowledgeBase
         kb = KnowledgeBase()
-        raw = kb.query_strategy(question, n_results=10)
+        raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
         if not chunks:
             chunks = raw[:5]
@@ -374,7 +375,7 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         meta = r.get("metadata", {})
         filename = meta.get("filename", "onbekend").replace(".md", "")
         doc = r.get("document", "")
-        doc_lines = [l for l in doc.split("\n") if l.strip() and not l.strip().startswith("#")]
+        doc_lines = [line for line in doc.split("\n") if line.strip() and not line.strip().startswith("#")]
         content = " ".join(doc_lines).strip()[:800]
         if content:
             context_parts.append(f"[Bron {i}: {filename}]\n{content}")

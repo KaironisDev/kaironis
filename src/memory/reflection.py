@@ -76,22 +76,11 @@ class ReflectionLog:
         """Maak de tabel en indices aan als ze nog niet bestaan."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            # Voer statements afzonderlijk uit
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS reflections (
-                    id SERIAL PRIMARY KEY,
-                    category VARCHAR(50) NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata JSONB,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC)"
-            )
+            # Voer statements uit CREATE_TABLE_SQL afzonderlijk uit
+            for statement in CREATE_TABLE_SQL.strip().split(";"):
+                stmt = statement.strip()
+                if stmt:
+                    await conn.execute(stmt)
         logger.info("ReflectionLog tabel geïnitialiseerd")
 
     async def close(self) -> None:
