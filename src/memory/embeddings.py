@@ -1,12 +1,12 @@
 """
-Embedding wrapper voor Kaironis memory module.
+Embedding wrapper for the Kaironis memory module.
 
-Primair: Ollama nomic-embed-text via SSH tunnel naar sandbox.
-Fallback: sentence-transformers lokaal (all-MiniLM-L6-v2).
+Primary: Ollama nomic-embed-text via SSH tunnel to sandbox.
+Fallback: sentence-transformers locally (all-MiniLM-L6-v2).
 
-Configuratie via environment variables:
-  OLLAMA_HOST  - host van Ollama (default: localhost)
-  OLLAMA_PORT  - port van Ollama (default: 11435 via SSH tunnel)
+Configuration via environment variables:
+  OLLAMA_HOST  - Ollama host (default: localhost)
+  OLLAMA_PORT  - Ollama port (default: 11435 via SSH tunnel)
 """
 
 import os
@@ -28,10 +28,10 @@ FALLBACK_MODEL = os.getenv("EMBEDDING_FALLBACK_MODEL", "all-MiniLM-L6-v2")
 
 class EmbeddingClient:
     """
-    Client voor het genereren van text embeddings.
+    Client for generating text embeddings.
 
-    Probeert eerst Ollama (nomic-embed-text) te gebruiken.
-    Als Ollama niet bereikbaar is, valt terug op sentence-transformers lokaal.
+    Tries Ollama (nomic-embed-text) first.
+    Falls back to sentence-transformers locally if Ollama is unavailable.
 
     Example::
 
@@ -48,7 +48,7 @@ class EmbeddingClient:
         self.ollama_host = ollama_host
         self.ollama_port = ollama_port
         self.model = model
-        self._ollama_available: Optional[bool] = None  # None = nog niet getest
+        self._ollama_available: Optional[bool] = None  # None = not yet tested
         self._fallback_model = None  # Lazy loaded
 
     @property
@@ -56,7 +56,7 @@ class EmbeddingClient:
         return f"http://{self.ollama_host}:{self.ollama_port}/api/embeddings"
 
     def _check_ollama(self) -> bool:
-        """Test of Ollama bereikbaar is (cached na eerste check)."""
+        """Test whether Ollama is reachable (cached after first check)."""
         if self._ollama_available is not None:
             return self._ollama_available
 
@@ -67,18 +67,18 @@ class EmbeddingClient:
             )
             self._ollama_available = resp.status_code == 200
         except Exception as exc:
-            logger.warning("Ollama niet bereikbaar op %s:%d — %s", self.ollama_host, self.ollama_port, exc)
+            logger.warning("Ollama not reachable at %s:%d — %s", self.ollama_host, self.ollama_port, exc)
             self._ollama_available = False
 
         if self._ollama_available:
-            logger.info("Ollama beschikbaar op %s:%d", self.ollama_host, self.ollama_port)
+            logger.info("Ollama available at %s:%d", self.ollama_host, self.ollama_port)
         else:
-            logger.warning("Ollama niet beschikbaar — fallback naar sentence-transformers")
+            logger.warning("Ollama not available — falling back to sentence-transformers")
 
         return self._ollama_available
 
     def _get_ollama_embedding(self, text: str) -> List[float]:
-        """Vraag embedding op via Ollama API."""
+        """Request embedding via Ollama API."""
         payload = {"model": self.model, "prompt": text}
         resp = requests.post(self._ollama_url, json=payload, timeout=OLLAMA_TIMEOUT)
         resp.raise_for_status()
@@ -87,17 +87,17 @@ class EmbeddingClient:
         return embedding
 
     def _get_fallback_embedding(self, text: str) -> List[float]:
-        """Genereer embedding via sentence-transformers (lokaal)."""
+        """Generate embedding via sentence-transformers (locally)."""
         if self._fallback_model is None:
             try:
                 from sentence_transformers import SentenceTransformer
 
-                logger.info("Laden van fallback model: %s", FALLBACK_MODEL)
+                logger.info("Loading fallback model: %s", FALLBACK_MODEL)
                 self._fallback_model = SentenceTransformer(FALLBACK_MODEL)
             except ImportError as exc:
                 raise RuntimeError(
-                    "sentence-transformers niet geïnstalleerd. "
-                    "Installeer met: pip install sentence-transformers"
+                    "sentence-transformers not installed. "
+                    "Install with: pip install sentence-transformers"
                 ) from exc
 
         vector = self._fallback_model.encode(text, normalize_embeddings=True)
@@ -105,44 +105,44 @@ class EmbeddingClient:
 
     def get_embedding(self, text: str) -> List[float]:
         """
-        Genereer een embedding vector voor de gegeven tekst.
+        Generate an embedding vector for the given text.
 
-        Probeert Ollama (nomic-embed-text), valt terug op sentence-transformers
-        als Ollama niet bereikbaar is.
+        Tries Ollama (nomic-embed-text), falls back to sentence-transformers
+        if Ollama is not reachable.
 
         Args:
-            text: De tekst om te embedden.
+            text: The text to embed.
 
         Returns:
-            Embedding vector als lijst van floats.
+            Embedding vector as a list of floats.
 
         Raises:
-            RuntimeError: Als noch Ollama noch de fallback beschikbaar is.
+            RuntimeError: If neither Ollama nor the fallback is available.
         """
         if not text or not text.strip():
-            raise ValueError("Tekst mag niet leeg zijn")
+            raise ValueError("Text must not be empty")
 
         if self._check_ollama():
             try:
                 return self._get_ollama_embedding(text)
             except Exception as exc:
-                logger.error("Ollama embedding mislukt: %s — switch naar fallback", exc)
+                logger.error("Ollama embedding failed: %s — switching to fallback", exc)
                 self._ollama_available = False  # Reset cache
 
         return self._get_fallback_embedding(text)
 
     def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """
-        Genereer embeddings voor meerdere teksten.
+        Generate embeddings for multiple texts.
 
         Args:
-            texts: Lijst van teksten.
+            texts: List of texts.
 
         Returns:
-            Lijst van embedding vectors.
+            List of embedding vectors.
         """
         return [self.get_embedding(text) for text in texts]
 
     def reset_availability_cache(self) -> None:
-        """Reset de Ollama availability cache (handig na tunnel restart)."""
+        """Reset the Ollama availability cache (useful after tunnel restart)."""
         self._ollama_available = None

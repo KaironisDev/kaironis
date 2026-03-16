@@ -1,15 +1,15 @@
 """
-Knowledge base interface voor Kaironis — hoofd entry point voor de memory module.
+Knowledge base interface for Kaironis — main entry point for the memory module.
 
-Beheert het inladen van TCT strategy documenten, semantisch zoeken,
-en het genereren van context voor trading decisions.
+Manages ingestion of TCT strategy documents, semantic search,
+and context generation for trading decisions.
 
 Example::
 
     kb = KnowledgeBase()
     kb.ingest_strategy_docs("docs/strategy/")
     results = kb.query_strategy("supply zone entry criteria")
-    context = kb.get_context_for_trade("Bullish setup op H4 supply zone, 09:30 NY")
+    context = kb.get_context_for_trade("Bullish setup on H4 supply zone, 09:30 NY")
 """
 
 import logging
@@ -23,25 +23,25 @@ from .embeddings import EmbeddingClient
 
 logger = logging.getLogger(__name__)
 
-# Batch grootte voor ChromaDB upserts
+# Batch size for ChromaDB upserts
 _INGEST_BATCH_SIZE = int(os.getenv("KB_INGEST_BATCH_SIZE", "50"))
 
-# Max context lengte voor trade context output
+# Max context length for trade context output
 _MAX_CONTEXT_CHARS = int(os.getenv("KB_MAX_CONTEXT_CHARS", "4000"))
 
 
 class KnowledgeBase:
     """
-    Hoofd interface voor de Kaironis TCT strategy knowledge base.
+    Main interface for the Kaironis TCT strategy knowledge base.
 
-    Combineert ChromaDB opslag, Ollama embeddings en markdown chunking
-    in een eenvoudige API.
+    Combines ChromaDB storage, Ollama embeddings and markdown chunking
+    in a simple API.
 
     Args:
-        chroma_client: ChromaDB client (default: nieuwe instantie).
-        embedding_client: Embedding client (default: nieuwe instantie).
-        chunk_max_tokens: Max tokens per chunk bij ingest (default: 500).
-        chunk_overlap: Token overlap tussen chunks (default: 50).
+        chroma_client: ChromaDB client (default: new instance).
+        embedding_client: Embedding client (default: new instance).
+        chunk_max_tokens: Max tokens per chunk during ingest (default: 500).
+        chunk_overlap: Token overlap between chunks (default: 50).
     """
 
     def __init__(
@@ -66,32 +66,32 @@ class KnowledgeBase:
         force_reingest: bool = False,
     ) -> Dict[str, Any]:
         """
-        Lees alle .md bestanden uit docs_path, chunk ze en sla op in ChromaDB.
+        Read all .md files from docs_path, chunk them and store in ChromaDB.
 
-        Zoekt recursief naar .md bestanden in subdirectories
+        Recursively searches for .md files in subdirectories
         (lectures/, reviews/, reference/).
 
         Args:
-            docs_path: Pad naar de strategy docs directory.
-            force_reingest: Als True, verwijder bestaande data eerst.
+            docs_path: Path to the strategy docs directory.
+            force_reingest: If True, clear existing data first.
 
         Returns:
-            Dict met statistieken: files_processed, chunks_created, errors.
+            Dict with statistics: files_processed, chunks_created, errors.
         """
         path = Path(docs_path)
         if not path.exists():
-            raise FileNotFoundError(f"Strategy docs directory niet gevonden: {docs_path}")
+            raise FileNotFoundError(f"Strategy docs directory not found: {docs_path}")
 
         if force_reingest:
-            logger.warning("Force reingest — bestaande collection wordt geleegd")
+            logger.warning("Force reingest — existing collection will be cleared")
             self.chroma.reset_collection()
 
         md_files = sorted(path.rglob("*.md"))
         if not md_files:
-            logger.warning("Geen .md bestanden gevonden in %s", docs_path)
+            logger.warning("No .md files found in %s", docs_path)
             return {"files_processed": 0, "chunks_created": 0, "errors": []}
 
-        logger.info("Ingesteren van %d markdown bestanden uit %s", len(md_files), docs_path)
+        logger.info("Ingesting %d markdown files from %s", len(md_files), docs_path)
 
         stats: Dict[str, Any] = {
             "files_processed": 0,
@@ -106,7 +106,7 @@ class KnowledgeBase:
         batch_ids: List[str] = []
 
         def flush_batch() -> None:
-            """Sla de huidige batch op in ChromaDB."""
+            """Store the current batch in ChromaDB."""
             if not batch_texts:
                 return
             self.chroma.add_documents(
@@ -115,7 +115,7 @@ class KnowledgeBase:
                 metadatas=batch_metadatas,
                 ids=batch_ids,
             )
-            logger.debug("Batch van %d chunks opgeslagen", len(batch_texts))
+            logger.debug("Batch of %d chunks stored", len(batch_texts))
             batch_texts.clear()
             batch_embeddings.clear()
             batch_metadatas.clear()
@@ -130,20 +130,20 @@ class KnowledgeBase:
                     overlap=self.chunk_overlap,
                 )
 
-                # Relatief pad voor metadata
+                # Relative path for metadata
                 try:
                     rel_path = str(md_file.relative_to(path))
                 except ValueError:
                     rel_path = md_file.name
 
-                # Bepaal categorie op basis van subdir
+                # Determine category based on subdirectory
                 category = _detect_category(rel_path)
 
                 for chunk_idx, chunk in enumerate(chunks):
-                    # Skip header-only chunks: kort (<150 tekens) én geen zin (geen punt/komma/dubbele punt)
+                    # Skip header-only chunks: short (<150 chars) and no sentence (no period/comma/colon)
                     if chunk_idx == 0 and len(chunk) < 150 and not any(c in chunk for c in (".", ",", ":")):
                         logger.debug(
-                            "Chunk 0 van %s overgeslagen (header/bestandsnaam detectie, %d tekens)",
+                            "Chunk 0 of %s skipped (header/filename detection, %d chars)",
                             rel_path, len(chunk),
                         )
                         continue
@@ -161,7 +161,7 @@ class KnowledgeBase:
                         embedding = self.embedder.get_embedding(chunk)
                     except Exception as emb_exc:
                         logger.error(
-                            "Embedding mislukt voor %s chunk %d: %s",
+                            "Embedding failed for %s chunk %d: %s",
                             rel_path, chunk_idx, emb_exc
                         )
                         stats["errors"].append(  # type: ignore[attr-defined]
@@ -179,17 +179,17 @@ class KnowledgeBase:
 
                 stats["files_processed"] = stats["files_processed"] + 1
                 stats["chunks_created"] = stats["chunks_created"] + len(chunks)
-                logger.debug("Verwerkt: %s (%d chunks)", rel_path, len(chunks))
+                logger.debug("Processed: %s (%d chunks)", rel_path, len(chunks))
 
             except Exception as exc:
-                logger.error("Fout bij verwerken van %s: %s", md_file, exc)
+                logger.error("Error processing %s: %s", md_file, exc)
                 stats["errors"].append(f"{md_file.name}: {exc}")  # type: ignore[attr-defined]
 
-        # Laatste batch
+        # Final batch
         flush_batch()
 
         logger.info(
-            "Ingest compleet: %d bestanden, %d chunks, %d fouten",
+            "Ingest complete: %d files, %d chunks, %d errors",
             stats["files_processed"],
             stats["chunks_created"],
             len(stats["errors"]),
@@ -207,21 +207,21 @@ class KnowledgeBase:
         category_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Semantisch zoeken in de TCT strategy knowledge base.
+        Semantic search in the TCT strategy knowledge base.
 
         Args:
-            question: De zoekvraag in natuurlijke taal.
-            n_results: Aantal resultaten (default: 5).
-            category_filter: Filter op categorie: "lectures", "reviews", "reference".
+            question: The search query in natural language.
+            n_results: Number of results (default: 5).
+            category_filter: Filter by category: "lectures", "reviews", "reference".
 
         Returns:
-            Lijst van dicts met keys:
-              - document (str): De gevonden tekst chunk
-              - metadata (dict): Bronbestand, categorie, etc.
-              - distance (float): Cosine afstand (lager = relevanter)
+            List of dicts with keys:
+              - document (str): The found text chunk
+              - metadata (dict): Source file, category, etc.
+              - distance (float): Cosine distance (lower = more relevant)
         """
         if not question or not question.strip():
-            raise ValueError("Zoekvraag mag niet leeg zijn")
+            raise ValueError("Search query must not be empty")
 
         query_embedding = self.embedder.get_embedding(question)
 
@@ -236,7 +236,7 @@ class KnowledgeBase:
         )
 
         logger.debug(
-            "Query '%s': %d resultaten gevonden",
+            "Query '%s': %d results found",
             question[:50],
             len(results),
         )
@@ -248,31 +248,31 @@ class KnowledgeBase:
         n_results: int = 5,
     ) -> str:
         """
-        Genereer geformatteerde strategy context voor een trade setup.
+        Generate formatted strategy context for a trade setup.
 
-        Zoekt relevante TCT kennis op basis van de setup beschrijving
-        en formatteert deze als leesbare tekst voor Kaironis.
+        Looks up relevant TCT knowledge based on the setup description
+        and formats it as readable text for Kaironis.
 
         Args:
-            setup_description: Beschrijving van de trade setup (bijv.
-                "Bullish H4 supply zone, 09:30 NY open, liquiditeit boven swept").
-            n_results: Aantal bronnen om te raadplegen (default: 5).
+            setup_description: Description of the trade setup (e.g.
+                "Bullish H4 supply zone, 09:30 NY open, liquidity above swept").
+            n_results: Number of sources to consult (default: 5).
 
         Returns:
-            Geformatteerde string met relevante strategy context,
-            klaar om aan Kaironis's prompt toe te voegen.
+            Formatted string with relevant strategy context,
+            ready to append to Kaironis's prompt.
         """
         if not setup_description or not setup_description.strip():
-            return "Geen setup beschrijving opgegeven."
+            return "No setup description provided."
 
         try:
             results = self.query_strategy(setup_description, n_results=n_results)
         except Exception as exc:
-            logger.error("Context ophalen mislukt: %s", exc)
-            return f"[Fout bij ophalen strategy context: {exc}]"
+            logger.error("Failed to retrieve context: %s", exc)
+            return f"[Error retrieving strategy context: {exc}]"
 
         if not results:
-            return "Geen relevante strategy informatie gevonden voor deze setup."
+            return "No relevant strategy information found for this setup."
 
         lines: List[str] = [
             "=== TCT STRATEGY CONTEXT ===",
@@ -287,26 +287,26 @@ class KnowledgeBase:
             meta = result.get("metadata", {})
             distance = result.get("distance", 1.0)
 
-            source = meta.get("source", "onbekend")
+            source = meta.get("source", "unknown")
             category = meta.get("category", "")
             relevance = max(0.0, 1.0 - distance)
 
             header = f"[{i}] {source}"
             if category:
                 header += f" ({category})"
-            header += f" — relevantie: {relevance:.0%}"
+            header += f" — relevance: {relevance:.0%}"
 
             entry = f"{header}\n{doc}\n"
 
-            # Stop als we de max context limiet bereiken
+            # Stop if we hit the max context length limit
             if total_chars + len(entry) > _MAX_CONTEXT_CHARS:
-                lines.append(f"[{i}+ meer resultaten afgekapt wegens lengte limiet]")
+                lines.append(f"[{i}+ more results truncated due to length limit]")
                 break
 
             lines.append(entry)
             total_chars += len(entry)
 
-        lines.append("=== EINDE CONTEXT ===")
+        lines.append("=== END CONTEXT ===")
         return "\n".join(lines)
 
     # ─────────────────────────────────────────────
@@ -314,7 +314,7 @@ class KnowledgeBase:
     # ─────────────────────────────────────────────
 
     def get_stats(self) -> Dict[str, Any]:
-        """Geeft statistieken over de knowledge base terug."""
+        """Return statistics about the knowledge base."""
         return {
             "collection": self.chroma.collection_name,
             "document_count": self.chroma.count(),
@@ -325,7 +325,7 @@ class KnowledgeBase:
 
 
 def _detect_category(rel_path: str) -> str:
-    """Detecteer de categorie van een document op basis van het pad."""
+    """Detect the category of a document based on its path."""
     lower = rel_path.lower()
     if "lecture" in lower:
         return "lectures"

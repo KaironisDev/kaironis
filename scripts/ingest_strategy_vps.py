@@ -39,7 +39,7 @@ CHROMA_PORT = 8000
 # We detecteren het IP automatisch
 def get_ollama_url() -> str:
     """Detecteer Ollama URL: probeer localhost:11434 first, dan Docker network."""
-    # Probeer localhost:11434
+    # Try localhost:11434
     try:
         r = requests.get("http://localhost:11434/api/tags", timeout=5)
         if r.status_code == 200:
@@ -47,7 +47,7 @@ def get_ollama_url() -> str:
     except Exception:
         pass
 
-    # Probeer Docker network IP via inspect
+    # Try Docker network IP via inspect
     try:
         result = subprocess.run(
             ["docker", "inspect", "ollama", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
@@ -159,7 +159,7 @@ def get_chroma_collection(reset: bool = False):
 
 
 # ─────────────────────────────────────────────
-# Docs laden
+# Load docs
 # ─────────────────────────────────────────────
 
 def determine_lecture_type(filepath: Path) -> str:
@@ -294,7 +294,7 @@ def ingest_docs(collection, docs: List[Dict]) -> Dict:
 
 
 # ─────────────────────────────────────────────
-# Validatie
+# Validation
 # ─────────────────────────────────────────────
 
 def run_validation_queries(collection) -> List[Dict]:
@@ -341,7 +341,7 @@ def run_validation_queries(collection) -> List[Dict]:
 
 
 # ─────────────────────────────────────────────
-# Rapport
+# Report
 # ─────────────────────────────────────────────
 
 def write_report(stats: Dict, query_results: List[Dict], collection_count: int, ollama_url: str) -> Path:
@@ -414,7 +414,7 @@ def main():
     logger.info("TCT Strategy Ingestie (VPS)")
     logger.info("=" * 60)
 
-    # Detecteer Ollama URL
+    # Detect Ollama URL
     logger.info("Ollama URL detecteren…")
     OLLAMA_BASE_URL = get_ollama_url()
     logger.info("Ollama gevonden: %s ✓", OLLAMA_BASE_URL)
@@ -427,26 +427,26 @@ def main():
     # ChromaDB
     collection = get_chroma_collection(reset=args.reset)
 
-    # Docs laden
+    # Load docs
     docs = load_strategy_docs()
     if not docs:
         logger.error("Geen docs gevonden in %s", DOCS_DIR)
         sys.exit(1)
 
-    # Ingesteren
+    # Ingest
     t0 = time.time()
     stats = ingest_docs(collection, docs)
     elapsed = time.time() - t0
     logger.info("Ingestie klaar in %.1fs", elapsed)
 
-    # Validatie
+    # Validation
     logger.info("")
     logger.info("=" * 60)
     logger.info("Validatie queries")
     logger.info("=" * 60)
     query_results = run_validation_queries(collection)
 
-    # Rapport
+    # Report
     collection_count = collection.count()
     report_path = write_report(stats, query_results, collection_count, OLLAMA_BASE_URL)
 
