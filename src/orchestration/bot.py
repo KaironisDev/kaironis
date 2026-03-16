@@ -25,7 +25,7 @@ import asyncio
 import logging
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -71,7 +71,7 @@ agent_state = {
     "trading_active": False,
     "paused": False,
     "emergency_stop": False,
-    "started_at": datetime.utcnow().isoformat(),
+    "started_at": datetime.now(tz=timezone.utc).isoformat(),
     "version": "0.3.0",
 }
 
@@ -142,7 +142,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/notes — Toon de laatste 5 notities\n\n"
         "*Emergency*\n"
         "/emergency — ⛔ KILL SWITCH — stop alles\n\n"
-        "_v0.2.0 — Memory Query & Reflection System_"
+        f"_v{agent_state['version']} — Memory Query & Reflection System_"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
@@ -607,8 +607,9 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 def _escape_md(text: str) -> str:
     """Escape special characters voor Telegram Markdown v1."""
-    # In Markdown v1 zijn _*`[ de speciale tekens
-    for char in ["_", "*", "`", "["]:
+    # Escape backslash first to avoid double-escaping, then special chars
+    text = text.replace("\\", "\\\\")
+    for char in ["_", "*", "`", "[", "]"]:
         text = text.replace(char, f"\\{char}")
     return text
 

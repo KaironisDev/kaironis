@@ -215,14 +215,16 @@ class ReflectionLog:
         if not query:
             return []
 
-        pattern = f"%{query}%"
+        # Escape LIKE wildcards in user input to prevent injection
+        safe_query = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{safe_query}%"
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
                 SELECT id, category, content, metadata, created_at
                 FROM reflections
-                WHERE content ILIKE $1 OR category ILIKE $1
+                WHERE content ILIKE $1 ESCAPE '\\' OR category ILIKE $1 ESCAPE '\\'
                 ORDER BY created_at DESC
                 LIMIT 20
                 """,
