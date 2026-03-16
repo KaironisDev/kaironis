@@ -328,7 +328,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 OLLAMA_GENERATE_MODEL = os.getenv("OLLAMA_GENERATE_MODEL", "llama3.2:latest")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 
 @operator_only
 async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
