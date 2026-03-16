@@ -327,6 +327,8 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ─────────────────────────────────────────────
 
 OLLAMA_GENERATE_MODEL = os.getenv("OLLAMA_GENERATE_MODEL", "llama3.2:latest")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5")
 
 @operator_only
 async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -383,22 +385,34 @@ TCT DOCUMENTATIE:
 
 ANTWOORD:"""
 
-    # Stap 3: Genereer antwoord via Ollama
+    # Stap 3: Genereer antwoord via OpenRouter (Gemini Flash)
     await update.message.reply_text("⏳ Even nadenken op basis van de TCT docs...")
     await update.message.chat.send_action("typing")
 
+    if not OPENROUTER_API_KEY:
+        await update.message.reply_text("❌ OPENROUTER\\_API\\_KEY niet ingesteld.", parse_mode="Markdown")
+        return
+
     try:
-        ollama_host = OLLAMA_HOST
-        ollama_port = OLLAMA_PORT
         resp = requests.post(
-            f"http://{ollama_host}:{ollama_port}/api/generate",
-            json={"model": OLLAMA_GENERATE_MODEL, "prompt": prompt, "stream": False},
-            timeout=60,
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/KaironisDev/kaironis",
+                "X-Title": "Kaironis Trading Bot",
+            },
+            json={
+                "model": OPENROUTER_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 600,
+            },
+            timeout=30,
         )
         resp.raise_for_status()
-        answer = resp.json().get("response", "").strip()
+        answer = resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        await update.message.reply_text(f"❌ Ollama generatie fout: `{e}`", parse_mode="Markdown")
+        await update.message.reply_text(f"❌ OpenRouter fout: `{e}`", parse_mode="Markdown")
         return
 
     if not answer:
