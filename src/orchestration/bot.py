@@ -423,14 +423,14 @@ ANTWOORD:"""
     sources = ", ".join(
         set(r.get("metadata", {}).get("filename", "?").replace(".md", "") for r in chunks)
     )
-    header = f"🤖 *{_escape_md(question)}*\n\n"
-    footer = f"\n\n_Bronnen: {_escape_md(sources)}_"
+    header = f"🤖 {question}\n\n"
+    footer = f"\n\nBronnen: {sources}"
 
-    response = header + _escape_md(answer) + footer
+    response = header + answer + footer
     if len(response) > 3900:
-        response = response[:3900] + "\n\n_[afgekapt]_"
+        response = response[:3900] + "\n\n[afgekapt]"
 
-    await update.message.reply_text(response, parse_mode="Markdown")
+    await update.message.reply_text(response)
 
 
 # ─────────────────────────────────────────────
