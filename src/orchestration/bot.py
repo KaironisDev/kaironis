@@ -25,6 +25,8 @@ import asyncio
 import logging
 import os
 import requests
+import sys
+import threading
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
@@ -43,7 +45,13 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OPERATOR_CHAT_ID = int(os.getenv("TELEGRAM_OPERATOR_CHAT_ID", "0"))
+_raw_operator_id = os.getenv("TELEGRAM_OPERATOR_CHAT_ID", "0")
+try:
+    OPERATOR_CHAT_ID = int(_raw_operator_id)
+except ValueError:
+    raise ValueError(
+        f"TELEGRAM_OPERATOR_CHAT_ID moet een integer zijn, kreeg: {_raw_operator_id!r}"
+    )
 
 # Ollama config (strip http:// prefix als aanwezig)
 _ollama_raw = os.getenv("OLLAMA_HOST", "localhost")
@@ -79,14 +87,18 @@ agent_state = {
 # Lazy-initialized singletons — shared across all command handlers
 _reflection_log = None
 _knowledge_base = None
+_reflection_lock = threading.Lock()
+_knowledge_lock = threading.Lock()
 
 
 def _get_reflection_log():
     """Lazy-initialize the ReflectionLog singleton."""
     global _reflection_log
-    if _reflection_log is None and DATABASE_URL:
-        from src.memory.reflection import ReflectionLog
-        _reflection_log = ReflectionLog(dsn=DATABASE_URL)
+    if _reflection_log is None:
+        with _reflection_lock:
+            if _reflection_log is None and DATABASE_URL:
+                from src.memory.reflection import ReflectionLog
+                _reflection_log = ReflectionLog(dsn=DATABASE_URL)
     return _reflection_log
 
 
@@ -94,8 +106,10 @@ def _get_knowledge_base():
     """Lazy-initialize the KnowledgeBase singleton. Avoids per-command re-init overhead."""
     global _knowledge_base
     if _knowledge_base is None:
-        from src.memory.knowledge_base import KnowledgeBase
-        _knowledge_base = KnowledgeBase()
+        with _knowledge_lock:
+            if _knowledge_base is None:
+                from src.memory.knowledge_base import KnowledgeBase
+                _knowledge_base = KnowledgeBase()
     return _knowledge_base
 
 
@@ -453,7 +467,7 @@ ANTWOORD:"""
 
     # Stap 4: Stuur antwoord
     sources = ", ".join(
-        set(r.get("metadata", {}).get("filename", "?").replace(".md", "") for r in chunks)
+        {r.get("metadata", {}).get("filename", "?").replace(".md", "") for r in chunks}
     )
     header = f"🤖 {question}\n\n"
     footer = f"\n\nBronnen: {sources}"
