@@ -299,9 +299,6 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Fetch more and filter chunk_index=0 (often header-only chunks)
         raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         results = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:3]
-        # Fallback: also filter on chunk_index to avoid reintroducing header-only chunks
-        if not results:
-            results = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:3]
     except Exception as e:
         logger.error("KnowledgeBase query failed: %s", e)
         await update.message.reply_text(
@@ -324,8 +321,13 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for i, result in enumerate(results, 1):
         doc = result.get("document", "")
         meta = result.get("metadata", {})
-        distance = result.get("distance", 1.0)
-        relevance = max(0.0, 1.0 - distance)
+        distance_raw = result.get("distance", 1.0)
+        try:
+            distance = max(0.0, float(distance_raw))
+        except (TypeError, ValueError):
+            logger.warning("Ongeldige distance waarde in /ask result: %r", distance_raw)
+            distance = 1.0
+        relevance = max(0.0, min(1.0, 1.0 - distance))
 
         # Metadata keys: filename, source_file, chunk_index
         filename = meta.get("filename") or meta.get("source_file") or meta.get("source") or "onbekend"
@@ -385,9 +387,6 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         kb = _get_knowledge_base()
         raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
-        # Fallback: keep chunk_index filter to avoid reintroducing header-only chunks
-        if not chunks:
-            chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
     except Exception as e:
         await update.message.reply_text(
             f"❌ ChromaDB fout: `{_escape_md(type(e).__name__)}`",

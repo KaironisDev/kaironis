@@ -142,7 +142,7 @@ class ReflectionLog:
                 """,
                 category,
                 content,
-                json.dumps(metadata) if metadata else None,
+                json.dumps(metadata) if metadata is not None else None,
             )
 
         record_id: int = row["id"]
