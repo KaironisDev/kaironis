@@ -390,6 +390,13 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if content:
             context_parts.append(f"[Bron {i}: {filename}]\n{content}")
 
+    # Stop early als er na opschoning geen bruikbare context is
+    if not context_parts:
+        await update.message.reply_text(
+            "🔍 Geen relevante informatie gevonden na opschoning van de gevonden chunks."
+        )
+        return
+
     context_text = "\n\n".join(context_parts)
 
     prompt = f"""Je bent Kaironis, een AI trading assistent gespecialiseerd in de TCT (Time-Cycle Trading) strategie.
@@ -433,7 +440,11 @@ ANTWOORD:"""
         resp.raise_for_status()
         answer = resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        await update.message.reply_text(f"❌ OpenRouter fout: `{e}`", parse_mode="Markdown")
+        err = _escape_md(f"{type(e).__name__}: {e}")
+        await update.message.reply_text(
+            f"❌ OpenRouter fout: `{err}`",
+            parse_mode="Markdown",
+        )
         return
 
     if not answer:

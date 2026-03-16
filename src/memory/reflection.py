@@ -60,6 +60,9 @@ class ReflectionLog:
     ) -> None:
         self._dsn = dsn
         self._pool: Optional[asyncpg.Pool] = pool
+        # Track of we de pool zelf aangemaakt hebben (True) of ge-injecteerd kregen (False).
+        # close() sluit alleen self-owned pools om externe pools niet te vernietigen.
+        self._owns_pool: bool = pool is None
         self._pool_init_lock = asyncio.Lock()
 
     async def _get_pool(self) -> asyncpg.Pool:
@@ -84,8 +87,8 @@ class ReflectionLog:
         logger.info("ReflectionLog tabel geïnitialiseerd")
 
     async def close(self) -> None:
-        """Sluit de connection pool."""
-        if self._pool:
+        """Sluit de connection pool — alleen als we hem zelf aangemaakt hebben."""
+        if self._pool is not None and self._owns_pool:
             await self._pool.close()
             self._pool = None
 
@@ -166,6 +169,10 @@ class ReflectionLog:
         Raises:
             ValueError: As limit < 1.
         """
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise ValueError(
+                f"limit must be an integer >= 1, got {type(limit).__name__!r}"
+            )
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
 
