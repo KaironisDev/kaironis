@@ -346,7 +346,12 @@ def _row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
     if isinstance(metadata, str):
         try:
             metadata = json.loads(metadata)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError) as exc:
+            try:
+                row_id = row["id"]
+            except Exception:
+                row_id = "?"
+            logger.warning("Failed to parse metadata JSON (id=%s): %s", row_id, exc)
             metadata = {}
 
     created_at = row["created_at"]

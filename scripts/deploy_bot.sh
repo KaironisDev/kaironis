@@ -1,19 +1,19 @@
 #!/bin/bash
-# deploy_bot.sh — Deploy bot update naar sandbox en/of prod
+# deploy_bot.sh — Deploy bot update to sandbox and/or prod
 #
-# Gebruik:
+# Usage:
 #   ./scripts/deploy_bot.sh sandbox
 #   ./scripts/deploy_bot.sh prod
 #   ./scripts/deploy_bot.sh both
 #
-# Vereisten: SSH key in ~/.ssh/kaironis_sandbox en ~/.ssh/kaironis_prod
-#            Hostkeys van de servers moeten gepind zijn in ~/.ssh/known_hosts
-#            Bootstrap: ssh-keyscan -p 2847 <host> >> ~/.ssh/known_hosts
+# Requirements: SSH key in ~/.ssh/kaironis_sandbox and ~/.ssh/kaironis_prod
+#               Server host keys must be pinned in ~/.ssh/known_hosts
+#               Bootstrap: ssh-keyscan -p 2847 <host> >> ~/.ssh/known_hosts
 
 set -euo pipefail
 
 TARGET="${1:-both}"
-# Gebruik de BRANCH env-var als die gezet is, anders de huidige git-branch
+# Use the BRANCH env-var if set, otherwise use the current git branch
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 
 deploy_to() {
@@ -21,26 +21,27 @@ deploy_to() {
     local host="$2"
     local port="$3"
     local key="$4"
+    local compose_file="$5"
 
     echo ""
-    echo "=== Deploying naar $name ($host:$port) ==="
+    echo "=== Deploying to $name ($host:$port) using $compose_file ==="
 
-    # Geen StrictHostKeyChecking=no — hostkey moet gepind zijn in known_hosts
+    # No StrictHostKeyChecking=no — host key must be pinned in known_hosts
     ssh -i "$key" -p "$port" kaironis@"$host" bash << REMOTE
         set -euo pipefail
-        cd /opt/kaironis || { echo "ERROR: /opt/kaironis niet gevonden"; exit 1; }
+        cd /opt/kaironis || { echo "ERROR: /opt/kaironis not found"; exit 1; }
 
         echo "[1/3] Git pull ($BRANCH)..."
         git fetch origin
         git checkout "$BRANCH"
         git pull origin "$BRANCH"
 
-        echo "[2/3] Docker image bouwen en deployen..."
-        docker compose -f docker/docker-compose.sandbox.yaml build --no-cache kaironis-bot
-        docker compose -f docker/docker-compose.sandbox.yaml up -d kaironis-bot
+        echo "[2/3] Building and deploying Docker image..."
+        docker compose -f "$compose_file" build --no-cache kaironis-bot
+        docker compose -f "$compose_file" up -d kaironis-bot
 
-        echo "[3/3] Database tabel aanmaken..."
-        python3 - << 'PYEOF'
+        echo "[3/3] Initializing database schema..."
+        docker compose -f "$compose_file" exec -T kaironis-bot python3 -c "
 import asyncio, os, sys
 sys.path.insert(0, '/opt/kaironis')
 from src.memory.reflection import ReflectionLog
@@ -48,37 +49,37 @@ from src.memory.reflection import ReflectionLog
 async def main():
     dsn = os.getenv('DATABASE_URL')
     if not dsn:
-        print("WARN: DATABASE_URL niet ingesteld, tabel aanmaken overgeslagen")
+        print('WARN: DATABASE_URL not set, skipping schema init')
         return
     log = ReflectionLog(dsn=dsn)
     await log.initialize()
     await log.close()
-    print("Tabel aangemaakt/geverifieerd")
+    print('Schema created/verified')
 
 asyncio.run(main())
-PYEOF
+"
 
-        echo "=== Deploy klaar ==="
+        echo "=== Deploy complete ==="
 REMOTE
-    echo "✅ $name deploy succesvol"
+    echo "✅ $name deploy successful"
 }
 
 case "$TARGET" in
     sandbox)
-        deploy_to "sandbox" "72.61.167.71" "2847" "$HOME/.ssh/kaironis_sandbox"
+        deploy_to "sandbox" "<sandbox-vps>" "2847" "$HOME/.ssh/kaironis_sandbox" "docker/docker-compose.sandbox.yaml"
         ;;
     prod)
-        deploy_to "prod" "82.29.173.111" "2847" "$HOME/.ssh/kaironis_prod"
+        deploy_to "prod" "<prod-vps>" "2847" "$HOME/.ssh/kaironis_prod" "docker/docker-compose.prod.yaml"
         ;;
     both)
-        deploy_to "sandbox" "72.61.167.71" "2847" "$HOME/.ssh/kaironis_sandbox"
-        deploy_to "prod" "82.29.173.111" "2847" "$HOME/.ssh/kaironis_prod"
+        deploy_to "sandbox" "<sandbox-vps>" "2847" "$HOME/.ssh/kaironis_sandbox" "docker/docker-compose.sandbox.yaml"
+        deploy_to "prod" "<prod-vps>" "2847" "$HOME/.ssh/kaironis_prod" "docker/docker-compose.prod.yaml"
         ;;
     *)
-        echo "Gebruik: $0 [sandbox|prod|both]"
+        echo "Usage: $0 [sandbox|prod|both]"
         exit 1
         ;;
 esac
 
 echo ""
-echo "Verificeer met: /status, /ask test, /note test, /notes"
+echo "Verify with: /status, /ask test, /note test, /notes"

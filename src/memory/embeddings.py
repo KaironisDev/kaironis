@@ -137,13 +137,25 @@ class EmbeddingClient:
         """
         Generate embeddings for multiple texts.
 
+        Empty or whitespace-only strings are skipped with a warning — they
+        would raise a ValueError in get_embedding() and would crash the
+        entire batch.
+
         Args:
             texts: List of texts.
 
         Returns:
-            List of embedding vectors.
+            List of embedding vectors (one per non-empty input text).
         """
-        return [self.get_embedding(text) for text in texts]
+        results = []
+        for i, text in enumerate(texts):
+            if not text or not text.strip():
+                logger.warning(
+                    "get_embeddings_batch: skipping empty/whitespace text at index %d", i
+                )
+                continue
+            results.append(self.get_embedding(text))
+        return results
 
     def reset_availability_cache(self) -> None:
         """Reset the Ollama availability cache (useful after tunnel restart)."""

@@ -51,11 +51,17 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
 CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", "8000"))
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost")
-OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
+# OLLAMA_HOST may be a full URL like "http://ollama:11434" — strip the scheme and port.
+_raw_ollama_host = os.getenv("OLLAMA_HOST", "localhost")
+OLLAMA_HOST = _raw_ollama_host.replace("http://", "").replace("https://", "").split(":")[0]
+OLLAMA_PORT = (
+    int(_raw_ollama_host.replace("http://", "").replace("https://", "").split(":")[-1])
+    if ":" in _raw_ollama_host
+    else int(os.getenv("OLLAMA_PORT", "11434"))
+)
 DOCS_DIR = Path(os.getenv("DOCS_DIR", "docs/strategy"))
-IMAGE_COLLECTION = "tct_strategy"  # zelfde collection als tekst
-DPI = 150  # lager dan 300 voor snelheid, nog steeds leesbaar
+IMAGE_COLLECTION = "tct_strategy"  # same collection as text chunks
+DPI = 150  # lower than 300 for speed, still readable
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OLLAMA_URL = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}/api/embeddings"
@@ -219,19 +225,21 @@ def ingest_page(
     metadata: dict,
 ) -> None:
     """
-    Voegt een beschrijving van een PDF-pagina toe aan ChromaDB.
+    Adds a description of a PDF page to ChromaDB.
 
-    ID formaat: {filename}::img::{page_num}
-    Metadata bevat: filename, page_number, source_type="image", lecture_type
+    ID format: {rel_path}::img::{page_num}
+    Uses the relative path within DOCS_DIR to avoid doc_id collisions
+    when files with the same name exist in different subdirectories.
+    Metadata contains: filename, page_number, source_type="image", lecture_type
 
     Args:
         collection: ChromaDB collection object
-        description: Beschrijving van de visuele content
-        metadata: Dict met filename, page_number, lecture_type
+        description: Description of the visual content
+        metadata: Dict with filename, page_number, lecture_type, and rel_path
     """
-    filename = metadata["filename"]
+    rel_path = metadata.get("rel_path", metadata["filename"])
     page_num = metadata["page_number"]
-    doc_id = f"{filename}::img::{page_num}"
+    doc_id = f"{rel_path}::img::{page_num}"
 
     embedding = get_ollama_embedding(description)
 
@@ -361,38 +369,42 @@ def main() -> None:
 
         stats["bestanden_verwerkt"] += 1
 
+        # Use relative path within DOCS_DIR to avoid doc_id collisions
+        rel_path = str(pdf_path.relative_to(docs_path)).replace("\\", "/")
+
         for page_num, png_bytes in pages:
-            doc_id = f"{filename}::img::{page_num}"
+            doc_id = f"{rel_path}::img::{page_num}"
 
             # Duplicate check
             if doc_id in existing_ids:
-                log.debug(f"  Pagina {page_num}: al ingeësteerd → skip")
+                log.debug(f"  Page {page_num}: already ingested → skip")
                 stats["paginas_overgeslagen_duplicate"] += 1
                 continue
 
             # Rate limiting
             time.sleep(0.5)
 
-            # Beschrijf via Gemini
+            # Describe via Gemini
             try:
                 description = describe_image(png_bytes, filename, page_num)
             except Exception as e:
-                log.error(f"  Pagina {page_num}: Gemini fout: {e}")
+                log.error(f"  Page {page_num}: Gemini error: {e}")
                 stats["errors"] += 1
                 stats["error_details"].append(
-                    f"{filename} pagina {page_num}: Gemini fout: {e}"
+                    f"{filename} page {page_num}: Gemini error: {e}"
                 )
                 continue
 
             if description is None:
-                log.info(f"  Pagina {page_num}: geen visuele content → overgeslagen")
+                log.info(f"  Page {page_num}: no visual content → skipped")
                 stats["paginas_overgeslagen_geen_content"] += 1
                 continue
 
-            # Ingesteer in ChromaDB
+            # Ingest into ChromaDB
             try:
                 metadata = {
                     "filename": filename,
+                    "rel_path": rel_path,
                     "page_number": page_num,
                     "lecture_type": lecture_type,
                 }
@@ -400,14 +412,14 @@ def main() -> None:
                 existing_ids.add(doc_id)
                 stats["paginas_verwerkt"] += 1
                 log.info(
-                    f"  ✓ Pagina {page_num}: ingeësteerd "
-                    f"({len(description)} tekens)"
+                    f"  ✓ Page {page_num}: ingested "
+                    f"({len(description)} chars)"
                 )
             except Exception as e:
-                log.error(f"  Pagina {page_num}: ChromaDB fout: {e}")
+                log.error(f"  Page {page_num}: ChromaDB error: {e}")
                 stats["errors"] += 1
                 stats["error_details"].append(
-                    f"{filename} pagina {page_num}: ChromaDB fout: {e}"
+                    f"{filename} page {page_num}: ChromaDB error: {e}"
                 )
 
     # ── Rapport ──────────────────────────────

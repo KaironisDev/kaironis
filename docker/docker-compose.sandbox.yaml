@@ -21,11 +21,14 @@ services:
       - ENVIRONMENT=sandbox
       - LOG_LEVEL=DEBUG
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'python.*bot' > /dev/null || exit 1"]
+      # The bot writes /tmp/kaironis_healthy on successful startup.
+      # This avoids relying on process name matching (pgrep) which is fragile
+      # and can produce false positives when the process name changes.
+      test: ["CMD-SHELL", "test -f /tmp/kaironis_healthy"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
     networks:
       - app-net
       - docker_default

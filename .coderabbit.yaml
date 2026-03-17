@@ -1,27 +1,27 @@
-language: "nl"
+language: "en"
 
-# Project context voor CodeRabbit reviews
-# Kaironis is een autonoom AI trading systeem gebouwd voor een ervaren trader (Perry) in Nederland.
+# Project context for CodeRabbit reviews.
+# Kaironis is an autonomous AI trading system built for an experienced trader (Perry) in the Netherlands.
 #
-# Wat Kaironis doet:
-# - Handelt op basis van de TCT (Time-Cycle Trading) strategie.
-# - Doel: 10%+ maandelijks rendement op Breakout Prop funded accounts.
+# What Kaironis does:
+# - Trades based on the TCT (Time-Cycle Trading) strategy.
+# - Goal: 10%+ monthly return on Breakout Prop funded accounts.
 #
-# Architectuur:
-# - Telegram bot als operator interface (@KaironisBot prod, @Kaironis_test_bot sandbox)
-# - ChromaDB kennisbank, Ollama embeddings, OpenRouter RAG, PostgreSQL, Redis
-# - Twee VPS servers: prod (82.29.173.111) en sandbox (72.61.167.71)
+# Architecture:
+# - Telegram bot as operator interface (@KaironisBot prod, @Kaironis_test_bot sandbox)
+# - ChromaDB knowledge base, Ollama embeddings, OpenRouter RAG, PostgreSQL, Redis
+# - Two VPS servers: prod (<prod-vps>) and sandbox (<sandbox-vps>)
 #
-# Kritieke principes:
-# - Veiligheid boven alles: autonome trading beslissingen moeten traceerbaar zijn
-# - Operator kan altijd ingrijpen: kill switch is heilig
-# - Geen silent failures: fouten kosten geld
-# - Secrets nooit in code: alles via environment variables
-# - Audit trail: elke trading actie moet gelogd zijn
+# Critical principles:
+# - Safety above all: autonomous trading decisions must be traceable
+# - Operator can always intervene: kill switch is sacred
+# - No silent failures: errors cost money
+# - Secrets never in code: everything via environment variables
+# - Audit trail: every trading action must be logged
 
 reviews:
   profile: "assertive"
-  request_changes_workflow: true
+  request_changes_workflow: false
   high_level_summary: true
   poem: false
   review_status: true
@@ -30,53 +30,53 @@ reviews:
   path_instructions:
     - path: "src/orchestration/**"
       instructions: |
-        Dit is de Telegram bot interface voor Kaironis, een autonoom AI trading systeem.
-        Review vanuit het perspectief van een algo-trader en software architect:
-        - Is de error handling robuust genoeg voor een trading context? Fouten mogen nooit stil falen.
-        - Zijn credentials en API keys veilig afgeschermd (nooit hardcoded)?
-        - Is de operator-only beveiliging correct geïmplementeerd?
-        - Zijn commando's duidelijk en bruikbaar tijdens live trading sessies?
+        This is the Telegram bot interface for Kaironis, an autonomous AI trading system.
+        Review from the perspective of an algo-trader and software architect:
+        - Is the error handling robust enough for a trading context? Errors must never fail silently.
+        - Are credentials and API keys safely shielded (never hardcoded)?
+        - Is the operator-only security correctly implemented?
+        - Are commands clear and usable during live trading sessions?
 
     - path: "src/memory/**"
       instructions: |
-        Dit is de memory/kennisbank module van Kaironis (ChromaDB + PostgreSQL).
-        Review vanuit een data-kwaliteit en trading perspectief:
-        - Is de embedding logica correct? Verkeerde embeddings leiden tot slechte trading beslissingen.
-        - Is de chunking strategie zinvol voor TCT strategy documenten?
-        - Zijn database operaties veilig (SQL injection, connection pooling)?
-        - Zijn errors in de kennisbank query graceful afgehandeld?
+        This is the memory/knowledge base module of Kaironis (ChromaDB + PostgreSQL).
+        Review from a data-quality and trading perspective:
+        - Is the embedding logic correct? Wrong embeddings lead to bad trading decisions.
+        - Is the chunking strategy meaningful for TCT strategy documents?
+        - Are database operations safe (SQL injection, connection pooling)?
+        - Are errors in the knowledge base query handled gracefully?
 
     - path: "src/trading/**"
       instructions: |
-        Dit is de trading engine van Kaironis. Extreme zorgvuldigheid vereist.
-        Review als een senior algo-trader + risk manager:
-        - Zijn er harde stop-losses en position size limieten geïmplementeerd?
-        - Kan het systeem onbedoeld een positie openen of sluiten?
-        - Is er audit logging voor elke trading actie?
-        - Worden edge cases (geen liquiditeit, API timeout, slippage) afgehandeld?
+        This is the trading engine of Kaironis. Extreme care required.
+        Review as a senior algo-trader + risk manager:
+        - Are there hard stop-losses and position size limits implemented?
+        - Can the system unintentionally open or close a position?
+        - Is there audit logging for every trading action?
+        - Are edge cases (no liquidity, API timeout, slippage) handled?
 
     - path: "src/core/**"
       instructions: |
-        Dit is de agent loop - het brein van Kaironis.
-        Review als een AI safety engineer én algo-trader:
-        - Zijn er duidelijke grenzen aan autonome beslissingen?
-        - Kan de operator altijd ingrijpen (kill switch)?
-        - Is de beslissingslogica transparant en traceerbaar?
+        This is the agent loop - the brain of Kaironis.
+        Review as an AI safety engineer and algo-trader:
+        - Are there clear limits on autonomous decisions?
+        - Can the operator always intervene (kill switch)?
+        - Is the decision logic transparent and traceable?
 
     - path: "docker/**"
       instructions: |
-        Docker configuratie voor productie trading systeem.
-        - Zijn secrets correct via environment variables doorgegeven (nooit in image)?
-        - Zijn de health checks adequaat?
-        - Zijn de netwerken correct geïsoleerd?
-        - Zijn volumes persistent voor kritische data (PostgreSQL, ChromaDB)?
+        Docker configuration for production trading system.
+        - Are secrets correctly passed via environment variables (never in the image)?
+        - Are the health checks adequate?
+        - Are the networks correctly isolated?
+        - Are volumes persistent for critical data (PostgreSQL, ChromaDB)?
 
     - path: "tests/**"
       instructions: |
-        Tests voor een trading systeem waarbij fouten geld kosten.
-        - Zijn de kritieke paden (trading beslissingen, risk checks) getest?
-        - Worden edge cases getest (lege kennisbank, DB down, API timeout)?
-        - Zijn mocks realistisch genoeg om productie gedrag te simuleren?
+        Tests for a trading system where errors cost money.
+        - Are the critical paths (trading decisions, risk checks) tested?
+        - Are edge cases tested (empty knowledge base, DB down, API timeout)?
+        - Are mocks realistic enough to simulate production behavior?
 
   auto_review:
     enabled: true

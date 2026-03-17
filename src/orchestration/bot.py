@@ -28,6 +28,7 @@ import requests
 import sys
 import threading
 from datetime import datetime, timezone
+from functools import wraps
 from urllib.parse import quote_plus
 
 from telegram import Update
@@ -88,6 +89,9 @@ agent_state = {
     "version": "0.3.0",
 }
 
+# Lock for thread-safe mutations of agent_state (used by /pause, /resume, /emergency)
+_agent_state_lock = threading.Lock()
+
 # Lazy-initialized singletons — shared across all command handlers
 _reflection_log = None
 _knowledge_base = None
@@ -123,6 +127,7 @@ def _get_knowledge_base():
 
 def operator_only(func):
     """Decorator: block everyone who is not the operator."""
+    @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id != OPERATOR_CHAT_ID:
             logger.warning(
@@ -133,7 +138,6 @@ def operator_only(func):
             )
             return
         return await func(update, context)
-    wrapper.__name__ = func.__name__
     return wrapper
 
 
@@ -216,14 +220,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 @operator_only
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Pause autonomous trading."""
-    if agent_state["emergency_stop"]:
-        await update.message.reply_text(
-            "🚨 Emergency stop is active. Use /resume to restart after review."
-        )
-        return
-
-    agent_state["paused"] = True
-    agent_state["trading_active"] = False
+    with _agent_state_lock:
+        if agent_state["emergency_stop"]:
+            await update.message.reply_text(
+                "🚨 Emergency stop is active. Use /resume to restart after review."
+            )
+            return
+        agent_state["paused"] = True
+        agent_state["trading_active"] = False
     logger.info("Trading paused by operator %s", update.effective_user.id)
 
     await update.message.reply_text(
@@ -237,9 +241,10 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @operator_only
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Resume autonomous trading."""
-    agent_state["paused"] = False
-    agent_state["emergency_stop"] = False
-    agent_state["trading_active"] = True
+    with _agent_state_lock:
+        agent_state["paused"] = False
+        agent_state["emergency_stop"] = False
+        agent_state["trading_active"] = True
     logger.info("Trading resumed by operator %s", update.effective_user.id)
 
     await update.message.reply_text(
@@ -253,9 +258,10 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 @operator_only
 async def cmd_emergency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """KILL SWITCH — stop everything immediately."""
-    agent_state["emergency_stop"] = True
-    agent_state["trading_active"] = False
-    agent_state["paused"] = True
+    with _agent_state_lock:
+        agent_state["emergency_stop"] = True
+        agent_state["trading_active"] = False
+        agent_state["paused"] = True
 
     logger.critical(
         "EMERGENCY STOP activated by operator %s", update.effective_user.id
@@ -420,12 +426,15 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 Answer the following question based on the provided TCT documentation. Be concrete and practical.
 Answer in English. Maximum 400 words.
 
-QUESTION: {question}
+<question>
+{question}
+</question>
 
-TCT DOCUMENTATION:
+<tct_documentation>
 {context_text}
+</tct_documentation>
 
-ANSWER:"""
+Answer:"""
 
     # Step 3: Generate answer via OpenRouter (Gemini Flash)
     await update.message.reply_text("⏳ Thinking based on TCT docs...")
@@ -665,8 +674,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                 chat_id=update.effective_chat.id,
                 text=f"❌ Unexpected error: {type(context.error).__name__}. It has been logged.",
             )
-        except Exception:
-            pass
+        except Exception as notify_error:
+            logger.error("Failed to send error notification: %s", notify_error)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -704,6 +713,15 @@ async def _on_startup(app) -> None:
         logger.info("KnowledgeBase singleton pre-warmed at startup")
     except Exception as e:
         logger.warning("KnowledgeBase pre-warming failed (ChromaDB down?): %s", e)
+
+    # Write health sentinel file for the Docker health check.
+    # The health check (docker-compose.sandbox.yaml) tests for this file.
+    try:
+        with open("/tmp/kaironis_healthy", "w") as f:
+            f.write(datetime.now(tz=timezone.utc).isoformat())
+        logger.info("Health sentinel file written: /tmp/kaironis_healthy")
+    except OSError as e:
+        logger.warning("Could not write health sentinel file: %s", e)
 
 
 def main() -> None:

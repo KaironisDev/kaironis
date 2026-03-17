@@ -291,14 +291,14 @@ class TestEmbeddingClient:
         from src.memory.embeddings import EmbeddingClient
 
         client = EmbeddingClient()
-        with pytest.raises(ValueError, match="leeg"):
+        with pytest.raises(ValueError, match="empty"):
             client.get_embedding("")
 
     def test_get_embedding_raises_on_whitespace_text(self):
         from src.memory.embeddings import EmbeddingClient
 
         client = EmbeddingClient()
-        with pytest.raises(ValueError, match="leeg"):
+        with pytest.raises(ValueError, match="empty"):
             client.get_embedding("   ")
 
     def test_batch_embeddings(self):
@@ -365,7 +365,7 @@ class TestKnowledgeBase:
 
     def test_query_strategy_raises_on_empty_question(self):
         kb, _, _ = self._make_kb()
-        with pytest.raises(ValueError, match="leeg"):
+        with pytest.raises(ValueError, match="empty"):
             kb.query_strategy("")
 
     def test_get_context_for_trade_formats_output(self):
@@ -385,20 +385,20 @@ class TestKnowledgeBase:
         assert "TCT STRATEGY CONTEXT" in context
         assert "Bullish H4 supply zone setup" in context
         assert "supply zones" in context.lower()
-        assert "EINDE CONTEXT" in context
+        assert "END CONTEXT" in context
 
     def test_get_context_returns_message_when_no_results(self):
         kb, mock_chroma, _ = self._make_kb()
         mock_chroma.query.return_value = []
 
-        context = kb.get_context_for_trade("onbekende setup")
+        context = kb.get_context_for_trade("unknown setup")
 
-        assert "geen" in context.lower() or "not" in context.lower()
+        assert "no" in context.lower() or "not" in context.lower()
 
     def test_get_context_handles_empty_description(self):
         kb, _, _ = self._make_kb()
         context = kb.get_context_for_trade("")
-        assert "opgegeven" in context or len(context) > 0
+        assert len(context) > 0
 
     def test_get_stats(self):
         kb, mock_chroma, _ = self._make_kb()

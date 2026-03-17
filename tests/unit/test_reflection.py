@@ -88,14 +88,14 @@ class TestLogObservation:
     async def test_invalid_category_raises(self):
         mock_pool, _ = make_mock_pool()
         log = ReflectionLog(pool=mock_pool)
-        with pytest.raises(ValueError, match="Ongeldige categorie"):
+        with pytest.raises(ValueError, match="Invalid category"):
             await log.log_observation("invalid_cat", "Some content")
 
     @pytest.mark.asyncio
     async def test_empty_content_raises(self):
         mock_pool, _ = make_mock_pool()
         log = ReflectionLog(pool=mock_pool)
-        with pytest.raises(ValueError, match="Content mag niet leeg zijn"):
+        with pytest.raises(ValueError, match="Content must not be empty"):
             await log.log_observation("lesson_learned", "   ")
 
     @pytest.mark.asyncio
@@ -448,8 +448,8 @@ class TestLifecycle:
 
     @pytest.mark.asyncio
     async def test_no_dsn_and_no_pool_raises_on_query(self):
-        log = ReflectionLog()  # geen dsn, geen pool
-        with pytest.raises(ValueError, match="Geen DSN opgegeven"):
+        log = ReflectionLog()  # no dsn, no pool
+        with pytest.raises(ValueError, match="No DSN provided"):
             await log.get_recent()
 
 

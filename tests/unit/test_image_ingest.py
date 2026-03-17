@@ -7,6 +7,7 @@ Tests zijn volledig offline en idempotent.
 
 import base64
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
@@ -233,22 +234,24 @@ def test_main_skips_duplicate_pages(tmp_path):
     # Pagina 2 heeft content, pagina 1 is duplicate
     long_description = "Uitgebreide beschrijving van visuele TCT content op deze pagina met supply demand zones."
 
-    # Patch de module-level constanten direct (env vars zijn al ingelezen bij import)
-    with patch.object(ingest_images, "OPENROUTER_API_KEY", "test-key"):
-        with patch.object(ingest_images, "DOCS_DIR", docs_dir):
-            with patch("chromadb.HttpClient", return_value=mock_client):
-                with patch.object(ingest_images, "pdf_to_images", return_value=fake_pages):
-                    with patch.object(
-                        ingest_images, "describe_image", return_value=long_description
-                    ) as mock_describe:
-                        with patch.object(
-                            ingest_images, "get_ollama_embedding", return_value=[0.1] * 768
-                        ):
-                            ingest_images.main()
+    # Patch module-level constants directly (env vars are already read at import time).
+    # ExitStack replaces deeply nested `with` blocks for readability.
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(ingest_images, "OPENROUTER_API_KEY", "test-key"))
+        stack.enter_context(patch.object(ingest_images, "DOCS_DIR", docs_dir))
+        stack.enter_context(patch("chromadb.HttpClient", return_value=mock_client))
+        stack.enter_context(patch.object(ingest_images, "pdf_to_images", return_value=fake_pages))
+        mock_describe = stack.enter_context(
+            patch.object(ingest_images, "describe_image", return_value=long_description)
+        )
+        stack.enter_context(
+            patch.object(ingest_images, "get_ollama_embedding", return_value=[0.1] * 768)
+        )
+        ingest_images.main()
 
-    # describe_image mag maar 1x aangeroepen zijn (pagina 2 — pagina 1 was duplicate)
+    # describe_image should be called only once (page 2 — page 1 was a duplicate)
     assert mock_describe.call_count == 1
-    # Tweede argument is filename, derde is page_num
+    # Second argument is filename, third is page_num
     assert mock_describe.call_args[0][2] == 2  # page_num=2
 
 
