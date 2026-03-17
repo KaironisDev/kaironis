@@ -2,24 +2,24 @@
 TCT Strategy Knowledge Base Ingestion Script
 =============================================
 
-Ingesteert alle TCT strategy .md bestanden in ChromaDB op de sandbox VPS.
+Ingests all TCT strategy .md files into ChromaDB on the sandbox VPS.
 
-Werking:
-1. Opent SSH tunnels: localhost:18000 → sandbox:8000 (ChromaDB)
+Process:
+1. Opens SSH tunnels: localhost:18000 → sandbox:8000 (ChromaDB)
                       localhost:11434 → sandbox:11434 (Ollama)
-2. Test verbindingen met ChromaDB en Ollama
-3. Maakt "tct_strategy" collection aan (of gebruikt bestaande)
-4. Leest alle .md bestanden uit docs/strategy/ recursief
-5. Chunked elk bestand (max 500 tokens, 50 overlap, markdown-aware)
-6. Genereert embeddings via Ollama nomic-embed-text
-7. Slaat chunks + embeddings + metadata op in ChromaDB
-8. Voert 5 validatie queries uit
-9. Schrijft ingest_report.md
+2. Tests connections to ChromaDB and Ollama
+3. Creates "tct_strategy" collection (or uses existing)
+4. Reads all .md files from docs/strategy/ recursively
+5. Chunks each file (max 500 tokens, 50 overlap, markdown-aware)
+6. Generates embeddings via Ollama nomic-embed-text
+7. Stores chunks + embeddings + metadata in ChromaDB
+8. Runs 5 validation queries
+9. Writes ingest_report.md
 
-Gebruik:
+Usage:
     python scripts/ingest_strategy.py [--reset]
 
-    --reset: Verwijder en hermaak de collection voor een frisse start
+    --reset: Delete and recreate the collection for a fresh start
 """
 
 import argparse
@@ -39,7 +39,7 @@ import chromadb
 from chromadb.config import Settings
 
 # ─────────────────────────────────────────────
-# Configuratie
+# Configuration
 # ─────────────────────────────────────────────
 
 WORKSPACE = Path(__file__).parent.parent
@@ -88,7 +88,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 class SSHTunnel:
-    """Beheert twee SSH port-forwarding tunnels via Paramiko."""
+    """Manages two SSH port-forwarding tunnels via Paramiko."""
 
     def __init__(self):
         self.client: Optional[paramiko.SSHClient] = None
@@ -96,7 +96,7 @@ class SSHTunnel:
         self._stop_event = threading.Event()
 
     def connect(self):
-        logger.info("SSH verbinding openen naar %s:%d …", SSH_HOST, SSH_PORT)
+        logger.info("Opening SSH connection to %s:%d …", SSH_HOST, SSH_PORT)
         self.client = paramiko.SSHClient()
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.client.connect(
@@ -106,17 +106,17 @@ class SSHTunnel:
             key_filename=str(SSH_KEY),
             timeout=15,
         )
-        logger.info("SSH verbinding OK ✓")
+        logger.info("SSH connection OK ✓")
 
-        # Start tunnels in achtergrond threads
+        # Start tunnels in background threads
         self._start_tunnel(CHROMA_LOCAL_PORT, "localhost", CHROMA_REMOTE_PORT, "ChromaDB")
         self._start_tunnel(OLLAMA_LOCAL_PORT, "localhost", OLLAMA_REMOTE_PORT, "Ollama")
 
-        # Geef tunnels even tijd om op te starten
+        # Give tunnels time to start
         time.sleep(2)
 
     def _start_tunnel(self, local_port: int, remote_host: str, remote_port: int, name: str):
-        """Start een port-forwarding tunnel in een daemon thread."""
+        """Start a port-forwarding tunnel in a daemon thread."""
         import socket
 
         transport = self.client.get_transport()
@@ -127,7 +127,7 @@ class SSHTunnel:
             try:
                 server.bind(("127.0.0.1", local_port))
             except OSError as e:
-                logger.warning("Poort %d al in gebruik (%s) — probeer bestaande tunnel te gebruiken", local_port, e)
+                logger.warning("Port %d already in use (%s) — trying to use existing tunnel", local_port, e)
                 return
 
             server.listen(5)
@@ -149,11 +149,11 @@ class SSHTunnel:
                         conn.getpeername(),
                     )
                 except Exception as e:
-                    logger.error("Channel openen mislukt: %s", e)
+                    logger.error("Failed to open channel: %s", e)
                     conn.close()
                     continue
 
-                # Bidirectioneel doorsturen
+                # Bidirectional forwarding
                 t = threading.Thread(target=self._forward_data, args=(conn, channel), daemon=True)
                 t.start()
 
@@ -200,14 +200,14 @@ class SSHTunnel:
         self._stop_event.set()
         if self.client:
             self.client.close()
-        logger.info("SSH tunnel gesloten")
+        logger.info("SSH tunnel closed")
 
 
 # ─────────────────────────────────────────────
-# Chunker (hergebruikt uit src/memory/chunker.py)
+# Chunker (reused from src/memory/chunker.py)
 # ─────────────────────────────────────────────
 
-# Voeg src aan het pad toe zodat we chunker.py kunnen importeren
+# Add src to path so we can import chunker.py
 sys.path.insert(0, str(WORKSPACE / "src"))
 from memory.chunker import chunk_markdown
 
@@ -217,7 +217,7 @@ from memory.chunker import chunk_markdown
 # ─────────────────────────────────────────────
 
 def get_embedding(text: str) -> List[float]:
-    """Genereer embedding via Ollama nomic-embed-text (via SSH tunnel)."""
+    """Generate embedding via Ollama nomic-embed-text (via SSH tunnel)."""
     url = f"http://localhost:{OLLAMA_LOCAL_PORT}/api/embeddings"
     resp = requests.post(
         url,
@@ -229,17 +229,17 @@ def get_embedding(text: str) -> List[float]:
 
 
 def test_ollama() -> bool:
-    """Test of Ollama bereikbaar is."""
+    """Test whether Ollama is reachable."""
     try:
         resp = requests.get(f"http://localhost:{OLLAMA_LOCAL_PORT}/api/tags", timeout=10)
         if resp.status_code == 200:
             models = [m["name"] for m in resp.json().get("models", [])]
-            logger.info("Ollama bereikbaar ✓  — modellen: %s", models)
+            logger.info("Ollama reachable ✓  — models: %s", models)
             if not any(OLLAMA_MODEL in m for m in models):
-                logger.warning("Model '%s' NIET gevonden in Ollama!", OLLAMA_MODEL)
+                logger.warning("Model '%s' NOT found in Ollama!", OLLAMA_MODEL)
             return True
     except Exception as e:
-        logger.error("Ollama niet bereikbaar: %s", e)
+        logger.error("Ollama not reachable: %s", e)
     return False
 
 
@@ -248,7 +248,7 @@ def test_ollama() -> bool:
 # ─────────────────────────────────────────────
 
 def get_chroma_collection(reset: bool = False):
-    """Maak verbinding met ChromaDB en geef de collection terug."""
+    """Connect to ChromaDB and return the collection."""
     client = chromadb.HttpClient(
         host="localhost",
         port=CHROMA_LOCAL_PORT,
@@ -258,15 +258,15 @@ def get_chroma_collection(reset: bool = False):
     # Test heartbeat
     try:
         hb = client.heartbeat()
-        logger.info("ChromaDB bereikbaar ✓  heartbeat=%s", hb)
+        logger.info("ChromaDB reachable ✓  heartbeat=%s", hb)
     except Exception as e:
-        logger.error("ChromaDB niet bereikbaar: %s", e)
+        logger.error("ChromaDB not reachable: %s", e)
         raise
 
     if reset:
         try:
             client.delete_collection(COLLECTION_NAME)
-            logger.info("Bestaande collection '%s' verwijderd (reset)", COLLECTION_NAME)
+            logger.info("Existing collection '%s' deleted (reset)", COLLECTION_NAME)
         except Exception:
             pass
 
@@ -274,16 +274,16 @@ def get_chroma_collection(reset: bool = False):
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
     )
-    logger.info("Collection '%s' gereed — %d documenten aanwezig", COLLECTION_NAME, collection.count())
+    logger.info("Collection '%s' ready — %d documents present", COLLECTION_NAME, collection.count())
     return collection
 
 
 # ─────────────────────────────────────────────
-# Docs lezen + lecture_type bepalen
+# Load docs + determine lecture_type
 # ─────────────────────────────────────────────
 
 def determine_lecture_type(filepath: Path) -> str:
-    """Bepaal het type document op basis van het pad."""
+    """Determine document type based on path."""
     parts = filepath.parts
     if "lectures" in parts:
         return "lecture"
@@ -295,13 +295,13 @@ def determine_lecture_type(filepath: Path) -> str:
 
 
 def load_strategy_docs() -> List[Dict]:
-    """Laad alle .md bestanden uit docs/strategy/ recursief."""
+    """Load all .md files from docs/strategy/ recursively."""
     docs = []
     for md_file in sorted(DOCS_DIR.rglob("*.md")):
         try:
             text = md_file.read_text(encoding="utf-8")
             if not text.strip():
-                logger.warning("Leeg bestand overgeslagen: %s", md_file.name)
+                logger.warning("Empty file skipped: %s", md_file.name)
                 continue
             docs.append({
                 "path": md_file,
@@ -310,24 +310,24 @@ def load_strategy_docs() -> List[Dict]:
                 "relative_path": str(md_file.relative_to(WORKSPACE)),
                 "lecture_type": determine_lecture_type(md_file),
             })
-            logger.debug("Geladen: %s (%d tekens)", md_file.name, len(text))
+            logger.debug("Loaded: %s (%d chars)", md_file.name, len(text))
         except Exception as e:
-            logger.error("Kan bestand niet lezen: %s — %s", md_file, e)
+            logger.error("Cannot read file: %s — %s", md_file, e)
 
-    logger.info("Totaal %d bestanden geladen uit %s", len(docs), DOCS_DIR)
+    logger.info("Total %d files loaded from %s", len(docs), DOCS_DIR)
     return docs
 
 
 # ─────────────────────────────────────────────
-# Ingestie
+# Ingestion
 # ─────────────────────────────────────────────
 
 def ingest_docs(collection, docs: List[Dict]) -> Dict:
     """
-    Ingesteer alle documenten in ChromaDB.
+    Ingest all documents into ChromaDB.
 
     Returns:
-        Stats dict met tellingen en eventuele errors.
+        Stats dict with counts and any errors.
     """
     stats = {
         "files_processed": 0,
@@ -341,17 +341,17 @@ def ingest_docs(collection, docs: List[Dict]) -> Dict:
 
     for doc_idx, doc in enumerate(docs, 1):
         filename = doc["filename"]
-        logger.info("[%d/%d] Verwerken: %s", doc_idx, total_files, filename)
+        logger.info("[%d/%d] Processing: %s", doc_idx, total_files, filename)
 
         try:
             chunks = chunk_markdown(doc["text"], max_tokens=MAX_TOKENS, overlap=OVERLAP_TOKENS)
             if not chunks:
-                logger.warning("Geen chunks gegenereerd voor %s", filename)
+                logger.warning("No chunks generated for %s", filename)
                 stats["files_skipped"] += 1
                 continue
 
             total_chunks = len(chunks)
-            logger.info("  → %d chunks gegenereerd", total_chunks)
+            logger.info("  → %d chunks generated", total_chunks)
 
             ids = []
             embeddings = []
@@ -362,10 +362,18 @@ def ingest_docs(collection, docs: List[Dict]) -> Dict:
                 if not chunk_text.strip():
                     continue
 
+                # Skip header-only chunks: short (<150 chars) and no sentence (no period/comma/colon)
+                if chunk_idx == 0 and len(chunk_text) < 150 and not any(c in chunk_text for c in (".", ",", ":")):
+                    logger.debug(
+                        "Chunk 0 of %s skipped (header/filename detection, %d chars)",
+                        filename, len(chunk_text),
+                    )
+                    continue
+
                 try:
                     embedding = get_embedding(chunk_text)
                 except Exception as e:
-                    err_msg = f"Embedding mislukt voor {filename} chunk {chunk_idx}: {e}"
+                    err_msg = f"Embedding failed for {filename} chunk {chunk_idx}: {e}"
                     logger.error(err_msg)
                     stats["errors"].append(err_msg)
                     continue
@@ -385,7 +393,7 @@ def ingest_docs(collection, docs: List[Dict]) -> Dict:
                 stats["chunks_total"] += 1
 
             if ids:
-                # Batch toevoegen (vervangt als ID al bestaat)
+                # Batch add (replaces if ID already exists)
                 try:
                     collection.upsert(
                         ids=ids,
@@ -394,22 +402,22 @@ def ingest_docs(collection, docs: List[Dict]) -> Dict:
                         metadatas=metadatas,
                     )
                     stats["chunks_stored"] += len(ids)
-                    logger.info("  → %d chunks opgeslagen ✓", len(ids))
+                    logger.info("  → %d chunks stored ✓", len(ids))
                 except Exception as e:
-                    err_msg = f"ChromaDB upsert mislukt voor {filename}: {e}"
+                    err_msg = f"ChromaDB upsert failed for {filename}: {e}"
                     logger.error(err_msg)
                     stats["errors"].append(err_msg)
 
             stats["files_processed"] += 1
 
         except Exception as e:
-            err_msg = f"Fout bij verwerken van {filename}: {e}"
+            err_msg = f"Error processing {filename}: {e}"
             logger.error(err_msg)
             stats["errors"].append(err_msg)
             stats["files_skipped"] += 1
 
     logger.info(
-        "Ingestie compleet: %d bestanden, %d chunks opgeslagen",
+        "Ingestion complete: %d files, %d chunks stored",
         stats["files_processed"],
         stats["chunks_stored"],
     )
@@ -417,11 +425,11 @@ def ingest_docs(collection, docs: List[Dict]) -> Dict:
 
 
 # ─────────────────────────────────────────────
-# Validatie queries
+# Validation queries
 # ─────────────────────────────────────────────
 
 def run_validation_queries(collection) -> List[Dict]:
-    """Voer validatie queries uit en geef resultaten terug."""
+    """Run validation queries and return results."""
     results = []
 
     for query in VALIDATION_QUERIES:
@@ -465,39 +473,39 @@ def run_validation_queries(collection) -> List[Dict]:
             results.append({"query": query, "hits": hits})
 
         except Exception as e:
-            logger.error("Query mislukt: %s — %s", query, e)
+            logger.error("Query failed: %s — %s", query, e)
             results.append({"query": query, "hits": [], "error": str(e)})
 
     return results
 
 
 # ─────────────────────────────────────────────
-# Rapportage
+# Report
 # ─────────────────────────────────────────────
 
 def write_report(stats: Dict, query_results: List[Dict], collection_count: int):
-    """Schrijf het ingest rapport naar docs/strategy/ingest_report.md."""
+    """Write the ingest report to docs/strategy/ingest_report.md."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     report_path = DOCS_DIR / "ingest_report.md"
 
     lines = [
         f"# TCT Strategy Knowledge Base — Ingest Report",
         f"",
-        f"**Datum:** {now}  ",
+        f"**Date:** {now}  ",
         f"**Model:** {OLLAMA_MODEL}  ",
         f"**Collection:** {COLLECTION_NAME}  ",
         f"",
         f"---",
         f"",
-        f"## Statistieken",
+        f"## Statistics",
         f"",
-        f"| Metric | Waarde |",
-        f"|--------|--------|",
-        f"| Bestanden verwerkt | {stats['files_processed']} |",
-        f"| Bestanden overgeslagen | {stats['files_skipped']} |",
-        f"| Chunks gegenereerd | {stats['chunks_total']} |",
-        f"| Chunks opgeslagen in ChromaDB | {stats['chunks_stored']} |",
-        f"| Totaal docs in collection | {collection_count} |",
+        f"| Metric | Value |",
+        f"|--------|-------|",
+        f"| Files processed | {stats['files_processed']} |",
+        f"| Files skipped | {stats['files_skipped']} |",
+        f"| Chunks generated | {stats['chunks_total']} |",
+        f"| Chunks stored in ChromaDB | {stats['chunks_stored']} |",
+        f"| Total docs in collection | {collection_count} |",
         f"| Errors | {len(stats['errors'])} |",
         f"",
     ]
@@ -514,7 +522,7 @@ def write_report(stats: Dict, query_results: List[Dict], collection_count: int):
     lines += [
         f"---",
         f"",
-        f"## Validatie Query Resultaten",
+        f"## Validation Query Results",
         f"",
     ]
 
@@ -526,7 +534,7 @@ def write_report(stats: Dict, query_results: List[Dict], collection_count: int):
         if "error" in qr:
             lines.append(f"❌ Error: {qr['error']}")
         elif not qr["hits"]:
-            lines.append("Geen resultaten gevonden.")
+            lines.append("No results found.")
         else:
             for hit in qr["hits"]:
                 lines += [
@@ -537,7 +545,7 @@ def write_report(stats: Dict, query_results: List[Dict], collection_count: int):
         lines.append("")
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
-    logger.info("Rapport geschreven naar %s", report_path)
+    logger.info("Report written to %s", report_path)
     return report_path
 
 
@@ -546,58 +554,58 @@ def write_report(stats: Dict, query_results: List[Dict], collection_count: int):
 # ─────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Ingesteer TCT strategy docs in ChromaDB")
-    parser.add_argument("--reset", action="store_true", help="Verwijder en hermaak de ChromaDB collection")
+    parser = argparse.ArgumentParser(description="Ingest TCT strategy docs into ChromaDB")
+    parser.add_argument("--reset", action="store_true", help="Delete and recreate the ChromaDB collection")
     args = parser.parse_args()
 
     logger.info("=" * 60)
-    logger.info("TCT Strategy Ingestie")
+    logger.info("TCT Strategy Ingestion")
     logger.info("=" * 60)
 
     tunnel = SSHTunnel()
     try:
-        # Stap 1: SSH tunnel openen
+        # Step 1: Open SSH tunnel
         tunnel.connect()
 
-        # Stap 2: Verbindingen testen
+        # Step 2: Test connections
         if not test_ollama():
-            logger.error("Ollama niet bereikbaar — abort")
+            logger.error("Ollama not reachable — aborting")
             sys.exit(1)
 
         collection = get_chroma_collection(reset=args.reset)
 
-        # Stap 3: Docs laden
+        # Step 3: Load docs
         docs = load_strategy_docs()
         if not docs:
-            logger.error("Geen documenten gevonden in %s", DOCS_DIR)
+            logger.error("No documents found in %s", DOCS_DIR)
             sys.exit(1)
 
-        # Stap 4: Ingesteren
+        # Step 4: Ingest
         start_time = time.time()
         stats = ingest_docs(collection, docs)
         elapsed = time.time() - start_time
-        logger.info("Ingestie duurde %.1f seconden", elapsed)
+        logger.info("Ingestion took %.1f seconds", elapsed)
 
-        # Stap 5: Validatie queries
+        # Step 5: Validation queries
         logger.info("")
         logger.info("=" * 60)
-        logger.info("Validatie queries")
+        logger.info("Validation queries")
         logger.info("=" * 60)
         query_results = run_validation_queries(collection)
 
-        # Stap 6: Rapport
+        # Step 6: Report
         collection_count = collection.count()
         report_path = write_report(stats, query_results, collection_count)
 
         logger.info("")
         logger.info("=" * 60)
-        logger.info("SAMENVATTING")
+        logger.info("SUMMARY")
         logger.info("=" * 60)
-        logger.info("Bestanden verwerkt : %d", stats["files_processed"])
-        logger.info("Chunks opgeslagen  : %d", stats["chunks_stored"])
+        logger.info("Files processed    : %d", stats["files_processed"])
+        logger.info("Chunks stored      : %d", stats["chunks_stored"])
         logger.info("Docs in collection : %d", collection_count)
         logger.info("Errors             : %d", len(stats["errors"]))
-        logger.info("Rapport            : %s", report_path)
+        logger.info("Report             : %s", report_path)
 
     finally:
         tunnel.close()

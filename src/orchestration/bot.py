@@ -2,17 +2,17 @@
 Kaironis Telegram Bot — Operator Interface
 
 Commands:
-    /start      - Welkomstbericht
-    /help       - Overzicht van commando's
-    /status     - Huidige agent status + ChromaDB status
-    /pause      - Pauzeer autonome trading
-    /resume     - Hervat autonome trading
-    /emergency  - KILL SWITCH — stop alles onmiddellijk
-    /ask        - Query de TCT strategy knowledge base (ruwe chunks)
-    /explain    - RAG: stel een vraag, krijg een samenvatting via AI
-    /note       - Sla een marktobservatie op
-    /lesson     - Sla een les op
-    /notes      - Toon de laatste 5 notities
+    /start      - Welcome message
+    /help       - Command overview
+    /status     - Current agent status + ChromaDB status
+    /pause      - Pause autonomous trading
+    /resume     - Resume autonomous trading
+    /emergency  - KILL SWITCH — stop everything immediately
+    /ask        - Query the TCT strategy knowledge base (raw chunks)
+    /explain    - RAG: ask a question, get a summary via AI
+    /note       - Save a market observation
+    /lesson     - Save a lesson learned
+    /notes      - Show the last 5 notes
 
 Architecture:
     - Async via python-telegram-bot v21
@@ -40,9 +40,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # Config
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 _raw_operator_id = os.getenv("TELEGRAM_OPERATOR_CHAT_ID", "0")
@@ -50,22 +50,22 @@ try:
     OPERATOR_CHAT_ID = int(_raw_operator_id)
 except ValueError:
     logger.critical(
-        "TELEGRAM_OPERATOR_CHAT_ID moet een integer zijn, kreeg: %r — bot kan niet starten.",
+        "TELEGRAM_OPERATOR_CHAT_ID must be an integer, got: %r — bot cannot start.",
         _raw_operator_id,
     )
     sys.exit(
-        f"Fout: TELEGRAM_OPERATOR_CHAT_ID moet een integer zijn, kreeg: {_raw_operator_id!r}"
+        f"Error: TELEGRAM_OPERATOR_CHAT_ID must be an integer, got: {_raw_operator_id!r}"
     )
 
-# Ollama config (strip http:// prefix als aanwezig)
+# Ollama config (strip http:// prefix if present)
 _ollama_raw = os.getenv("OLLAMA_HOST", "localhost")
 OLLAMA_HOST = _ollama_raw.replace("http://", "").replace("https://", "").split(":")[0]
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
 
-# DATABASE_URL: gebruik directe URL of stel samen uit losse variabelen.
-# Alleen als POSTGRES_HOST expliciet gezet is, anders blijft DATABASE_URL None
-# zodat _get_reflection_log() correct None teruggeeft en de handlers de
-# "DB niet geconfigureerd" melding tonen.
+# DATABASE_URL: use direct URL or compose from individual variables.
+# Only if POSTGRES_HOST is explicitly set, otherwise DATABASE_URL stays None
+# so that _get_reflection_log() correctly returns None and handlers show
+# the "DB not configured" message.
 _postgres_host = os.getenv("POSTGRES_HOST")
 DATABASE_URL = os.getenv("DATABASE_URL") or (
     "postgresql://{user}:{password}@{host}:{port}/{db}".format(
@@ -79,7 +79,7 @@ DATABASE_URL = os.getenv("DATABASE_URL") or (
     else None
 )
 
-# Agent state (in-memory voor nu, later via Redis)
+# Agent state (in-memory for now, later via Redis)
 agent_state = {
     "trading_active": False,
     "paused": False,
@@ -117,19 +117,19 @@ def _get_knowledge_base():
     return _knowledge_base
 
 
-# ─────────────────────────────────────────────
-# Security — alleen operator mag commando's geven
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Security — only the operator may issue commands
+# ─────────────────────────────────────────────────────────────────
 
 def operator_only(func):
-    """Decorator: blokkeer iedereen die geen operator is."""
+    """Decorator: block everyone who is not the operator."""
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id != OPERATOR_CHAT_ID:
             logger.warning(
-                f"Ongeautoriseerde toegang van user {update.effective_user.id}"
+                "Unauthorized access from user %s", update.effective_user.id
             )
             await update.message.reply_text(
-                "⛔ Niet geautoriseerd. Alleen de operator kan Kaironis aansturen."
+                "⛔ Not authorized. Only the operator can control Kaironis."
             )
             return
         return await func(update, context)
@@ -137,16 +137,16 @@ def operator_only(func):
     return wrapper
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # Command Handlers
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Welkomstbericht bij eerste contact."""
+    """Welcome message on first contact."""
     await update.message.reply_text(
         "⚡ *Kaironis online.*\n\n"
-        "Ik ben je autonome trading partner.\n"
-        "Gebruik /help voor een overzicht van commando's.\n\n"
+        "I am your autonomous trading partner.\n"
+        "Use /help for a command overview.\n\n"
         "_The opportune moment awaits._",
         parse_mode="Markdown",
     )
@@ -154,23 +154,23 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @operator_only
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Overzicht van alle commando's."""
+    """Overview of all commands."""
     help_text = (
         "🤖 *Kaironis Command Overview*\n\n"
         "*Status & Info*\n"
-        "/status — Huidige agent + ChromaDB status\n"
-        "/help — Dit overzicht\n\n"
+        "/status — Current agent + ChromaDB status\n"
+        "/help — This overview\n\n"
         "*Trading Control*\n"
-        "/pause — Pauzeer autonome trading\n"
-        "/resume — Hervat autonome trading\n\n"
+        "/pause — Pause autonomous trading\n"
+        "/resume — Resume autonomous trading\n\n"
         "*Knowledge Base*\n"
-        "/ask \\[vraag\\] — Query de TCT strategy knowledge base\n\n"
-        "*Notities & Learnings*\n"
-        "/note \\[tekst\\] — Sla een marktobservatie op\n"
-        "/lesson \\[tekst\\] — Sla een les op\n"
-        "/notes — Toon de laatste 5 notities\n\n"
+        "/ask \\[question\\] — Query the TCT strategy knowledge base\n\n"
+        "*Notes & Learnings*\n"
+        "/note \\[text\\] — Save a market observation\n"
+        "/lesson \\[text\\] — Save a lesson learned\n"
+        "/notes — Show the last 5 notes\n\n"
         "*Emergency*\n"
-        "/emergency — ⛔ KILL SWITCH — stop alles\n\n"
+        "/emergency — ⛔ KILL SWITCH — stop everything\n\n"
         f"_v{agent_state['version']} — Memory Query & Reflection System_"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
@@ -178,36 +178,36 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 @operator_only
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Geef huidige agent status + ChromaDB status."""
+    """Return current agent status + ChromaDB status."""
     status_emoji = "🔴" if agent_state["emergency_stop"] else \
                    "⏸️" if agent_state["paused"] else \
                    "🟢" if agent_state["trading_active"] else "🟡"
 
     status_text = "EMERGENCY STOP" if agent_state["emergency_stop"] else \
-                  "Gepauzeerd" if agent_state["paused"] else \
-                  "Trading actief" if agent_state["trading_active"] else "Standby"
+                  "Paused" if agent_state["paused"] else \
+                  "Trading active" if agent_state["trading_active"] else "Standby"
 
     # ChromaDB status check
-    chroma_status = "❓ Niet gecheckt"
+    chroma_status = "⬜ Not checked"
     chroma_count = ""
     try:
         kb = _get_knowledge_base()
         stats = await asyncio.to_thread(kb.get_stats)
         count = stats.get("document_count", 0)
-        chroma_status = "✅ Bereikbaar"
+        chroma_status = "✅ Reachable"
         chroma_count = f"\n*Chunks in collection:* {count}"
     except Exception as e:
-        chroma_status = f"❌ Niet bereikbaar ({_escape_md(type(e).__name__)})"
-        logger.warning("ChromaDB status check mislukt: %s", e)
+        chroma_status = f"❌ Not reachable ({_escape_md(type(e).__name__)})"
+        logger.warning("ChromaDB status check failed: %s", e)
 
     message = (
         f"{status_emoji} *Kaironis Status*\n\n"
         f"*Status:* {status_text}\n"
-        f"*Versie:* {agent_state['version']}\n"
-        f"*Online sinds:* {agent_state['started_at']} UTC\n\n"
-        f"*Trading:* {'Actief ✅' if agent_state['trading_active'] else 'Inactief ⏹️'}\n"
-        f"*Gepauzeerd:* {'Ja ⏸️' if agent_state['paused'] else 'Nee'}\n"
-        f"*Emergency stop:* {'JA 🚨' if agent_state['emergency_stop'] else 'Nee'}\n\n"
+        f"*Version:* {agent_state['version']}\n"
+        f"*Online since:* {agent_state['started_at']} UTC\n\n"
+        f"*Trading:* {'Active ✅' if agent_state['trading_active'] else 'Inactive ⏹️'}\n"
+        f"*Paused:* {'Yes ⏸️' if agent_state['paused'] else 'No'}\n"
+        f"*Emergency stop:* {'YES 🚨' if agent_state['emergency_stop'] else 'No'}\n\n"
         f"*ChromaDB:* {chroma_status}{chroma_count}"
     )
     await update.message.reply_text(message, parse_mode="Markdown")
@@ -215,83 +215,82 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 @operator_only
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Pauzeer autonome trading."""
+    """Pause autonomous trading."""
     if agent_state["emergency_stop"]:
         await update.message.reply_text(
-            "🚨 Emergency stop is actief. Gebruik /resume om te herstarten na review."
+            "🚨 Emergency stop is active. Use /resume to restart after review."
         )
         return
 
     agent_state["paused"] = True
     agent_state["trading_active"] = False
-    logger.info(f"Trading gepauzeerd door operator {update.effective_user.id}")
+    logger.info("Trading paused by operator %s", update.effective_user.id)
 
     await update.message.reply_text(
-        "⏸️ *Trading gepauzeerd.*\n\n"
-        "Kaironis monitort nog wel de markten maar voert geen trades uit.\n"
-        "Gebruik /resume om te hervatten.",
+        "⏸️ *Trading paused.*\n\n"
+        "Kaironis is still monitoring markets but will not execute trades.\n"
+        "Use /resume to continue.",
         parse_mode="Markdown",
     )
 
 
 @operator_only
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Hervat autonome trading."""
+    """Resume autonomous trading."""
     agent_state["paused"] = False
     agent_state["emergency_stop"] = False
     agent_state["trading_active"] = True
-    logger.info(f"Trading hervat door operator {update.effective_user.id}")
+    logger.info("Trading resumed by operator %s", update.effective_user.id)
 
     await update.message.reply_text(
-        "▶️ *Trading hervat.*\n\n"
-        "Kaironis is weer actief en monitort op setups.\n"
-        "Gebruik /status voor actuele staat.",
+        "▶️ *Trading resumed.*\n\n"
+        "Kaironis is active again and monitoring for setups.\n"
+        "Use /status for current state.",
         parse_mode="Markdown",
     )
 
 
 @operator_only
 async def cmd_emergency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """KILL SWITCH — stop alles onmiddellijk."""
+    """KILL SWITCH — stop everything immediately."""
     agent_state["emergency_stop"] = True
     agent_state["trading_active"] = False
     agent_state["paused"] = True
 
     logger.critical(
-        f"EMERGENCY STOP geactiveerd door operator {update.effective_user.id}"
+        "EMERGENCY STOP activated by operator %s", update.effective_user.id
     )
 
     await update.message.reply_text(
-        "🚨 *EMERGENCY STOP GEACTIVEERD*\n\n"
-        "✅ Alle trading gestopt\n"
-        "✅ Geen nieuwe posities mogelijk\n"
-        "✅ Monitors gepauzeerd\n\n"
-        "_Review de situatie en gebruik /resume om te hervatten._",
+        "🚨 *EMERGENCY STOP ACTIVATED*\n\n"
+        "✅ All trading stopped\n"
+        "✅ No new positions possible\n"
+        "✅ Monitors paused\n\n"
+        "_Review the situation and use /resume to continue._",
         parse_mode="Markdown",
     )
 
 
-# ─────────────────────────────────────────────
-# Memory Query — /ask
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Knowledge base — /ask
+# ─────────────────────────────────────────────────────────────────
 
 @operator_only
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Query de TCT strategy knowledge base via ChromaDB."""
-    # Haal de vraag op uit de message tekst
+    """Query the TCT strategy knowledge base via ChromaDB."""
     message_text = update.message.text or ""
-    # Strip het /ask commando
+    # Strip the /ask command
     parts = message_text.split(None, 1)
     if len(parts) < 2 or not parts[1].strip():
         await update.message.reply_text(
-            "❓ Gebruik: `/ask [vraag]`\n\nVoorbeeld: `/ask wat is PO3?`",
+            "⬜ Usage: `/ask [question]`\n\nExample: `/ask what is PO3?`",
             parse_mode="Markdown",
         )
         return
 
     question = parts[1].strip()
 
-    # Stuur "typing..." indicator
+    # Send "typing..." indicator
     await update.message.chat.send_action("typing")
 
     try:
@@ -302,21 +301,21 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.error("KnowledgeBase query failed: %s", e)
         await update.message.reply_text(
-            f"❌ Fout bij query naar knowledge base: `{_escape_md(type(e).__name__)}`",
+            f"❌ Error querying knowledge base: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
         return
 
     if not results:
         await update.message.reply_text(
-            "🔍 Geen relevante informatie gevonden voor deze vraag.\n\n"
-            "_Controleer of de knowledge base geïngesteerd is._",
+            "🔍 No relevant information found for this question.\n\n"
+            "_Check whether the knowledge base has been ingested._",
             parse_mode="Markdown",
         )
         return
 
-    # Bouw het antwoord op
-    lines = [f"🧠 *Kennis over: {_escape_md(question)}*\n"]
+    # Build the response
+    lines = [f"📚 *Knowledge about: {_escape_md(question)}*\n"]
 
     for i, result in enumerate(results, 1):
         doc = result.get("document", "")
@@ -325,13 +324,13 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             distance = max(0.0, float(distance_raw))
         except (TypeError, ValueError):
-            logger.warning("Ongeldige distance waarde in /ask result: %r", distance_raw)
+            logger.warning("Invalid distance value in /ask result: %r", distance_raw)
             distance = 1.0
         relevance = max(0.0, min(1.0, 1.0 - distance))
 
         # Metadata keys: filename, source_file, chunk_index
-        filename = meta.get("filename") or meta.get("source_file") or meta.get("source") or "onbekend"
-        # Strip pad prefix als aanwezig
+        filename = meta.get("filename") or meta.get("source_file") or meta.get("source") or "unknown"
+        # Strip path prefix if present
         filename = filename.split("/")[-1].replace(".md", "")
         chunk_idx = meta.get("chunk_index", "?")
 
@@ -346,35 +345,34 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         lines.append(
             f"*[{i}] {_escape_md(filename)}* "
-            f"(chunk {chunk_idx}, relevantie: {relevance:.0%})\n"
+            f"(chunk {chunk_idx}, relevance: {relevance:.0%})\n"
             f"{_escape_md(doc_preview)}\n"
         )
 
     response = "\n".join(lines)
 
-    # Zorg dat we onder de 4000-teken Telegram limiet blijven
+    # Keep under the 4000-char Telegram limit
     if len(response) > 3900:
-        response = response[:3900] + "\n\n_[afgekapt]_"
+        response = response[:3900] + "\n\n_[truncated]_"
 
     await update.message.reply_text(response, parse_mode="Markdown")
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # RAG — /explain
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
-OLLAMA_GENERATE_MODEL = os.getenv("OLLAMA_GENERATE_MODEL", "llama3.2:latest")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 
 @operator_only
 async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """RAG: stel een vraag, krijg een AI-samenvatting op basis van TCT docs."""
+    """RAG: ask a question, get an AI summary based on TCT docs."""
     message_text = update.message.text or ""
     parts = message_text.split(None, 1)
     if len(parts) < 2 or not parts[1].strip():
         await update.message.reply_text(
-            "🤖 Gebruik: `/explain [vraag]`\n\nVoorbeeld: `/explain wat is PO3 en hoe gebruik ik het?`",
+            "🤖 Usage: `/explain [question]`\n\nExample: `/explain what is PO3 and how do I use it?`",
             parse_mode="Markdown",
         )
         return
@@ -389,57 +387,57 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
     except Exception as e:
         await update.message.reply_text(
-            f"❌ ChromaDB fout: `{_escape_md(type(e).__name__)}`",
+            f"❌ ChromaDB error: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
         return
 
     if not chunks:
-        await update.message.reply_text("🔍 Geen relevante informatie gevonden.")
+        await update.message.reply_text("🔍 No relevant information found.")
         return
 
-    # Stap 2: Bouw context op
+    # Step 2: Build context
     context_parts = []
     for i, r in enumerate(chunks, 1):
         meta = r.get("metadata", {})
-        filename = meta.get("filename", "onbekend").replace(".md", "")
+        filename = meta.get("filename", "unknown").replace(".md", "")
         doc = r.get("document", "")
         doc_lines = [line for line in doc.split("\n") if line.strip() and not line.strip().startswith("#")]
         content = " ".join(doc_lines).strip()[:800]
         if content:
-            context_parts.append(f"[Bron {i}: {filename}]\n{content}")
+            context_parts.append(f"[Source {i}: {filename}]\n{content}")
 
-    # Stop early als er na opschoning geen bruikbare context is
+    # Stop early if there is no usable context after cleanup
     if not context_parts:
         await update.message.reply_text(
-            "🔍 Geen relevante informatie gevonden na opschoning van de gevonden chunks."
+            "🔍 No relevant information found after cleaning up the retrieved chunks."
         )
         return
 
     context_text = "\n\n".join(context_parts)
 
-    prompt = f"""Je bent Kaironis, een AI trading assistent gespecialiseerd in de TCT (Time-Cycle Trading) strategie.
-Beantwoord de volgende vraag op basis van de gegeven TCT documentatie. Wees concreet en praktisch.
-Antwoord in het Nederlands. Maximaal 400 woorden.
+    prompt = f"""You are Kaironis, an AI trading assistant specializing in the TCT (Time-Cycle Trading) strategy.
+Answer the following question based on the provided TCT documentation. Be concrete and practical.
+Answer in English. Maximum 400 words.
 
-VRAAG: {question}
+QUESTION: {question}
 
-TCT DOCUMENTATIE:
+TCT DOCUMENTATION:
 {context_text}
 
-ANTWOORD:"""
+ANSWER:"""
 
-    # Stap 3: Genereer antwoord via OpenRouter (Gemini Flash)
-    await update.message.reply_text("⏳ Even nadenken op basis van de TCT docs...")
+    # Step 3: Generate answer via OpenRouter (Gemini Flash)
+    await update.message.reply_text("⏳ Thinking based on TCT docs...")
     await update.message.chat.send_action("typing")
 
     if not OPENROUTER_API_KEY:
-        await update.message.reply_text("❌ OPENROUTER\\_API\\_KEY niet ingesteld.", parse_mode="Markdown")
+        await update.message.reply_text("❌ OPENROUTER\\_API\\_KEY not configured.", parse_mode="Markdown")
         return
 
     try:
-        # asyncio.to_thread() voorkomt dat de blocking HTTP-call de event loop blokkeert.
-        # Zo kan /emergency ook reageren terwijl OpenRouter nadenkt.
+        # asyncio.to_thread() prevents the blocking HTTP call from blocking the event loop.
+        # This allows /emergency to respond while OpenRouter is thinking.
         resp = await asyncio.to_thread(
             requests.post,
             "https://openrouter.ai/api/v1/chat/completions",
@@ -461,32 +459,32 @@ ANTWOORD:"""
     except Exception as e:
         err = _escape_md(f"{type(e).__name__}: {e}")
         await update.message.reply_text(
-            f"❌ OpenRouter fout: `{err}`",
+            f"❌ OpenRouter error: `{err}`",
             parse_mode="Markdown",
         )
         return
 
     if not answer:
-        await update.message.reply_text("❌ Leeg antwoord van het model.")
+        await update.message.reply_text("❌ Empty response from model.")
         return
 
-    # Stap 4: Stuur antwoord
+    # Step 4: Send response
     sources = ", ".join(
         {r.get("metadata", {}).get("filename", "?").replace(".md", "") for r in chunks}
     )
     header = f"🤖 {question}\n\n"
-    footer = f"\n\nBronnen: {sources}"
+    footer = f"\n\nSources: {sources}"
 
     response = header + answer + footer
     if len(response) > 3900:
-        response = response[:3900] + "\n\n[afgekapt]"
+        response = response[:3900] + "\n\n[truncated]"
 
     await update.message.reply_text(response)
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # Reflection Commands — /note, /lesson, /notes
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 async def _save_observation_and_reply(
     update: Update,
@@ -497,11 +495,11 @@ async def _save_observation_and_reply(
     success_label: str,
 ) -> None:
     """
-    Gedeelde helper voor /note en /lesson.
+    Shared helper for /note and /lesson.
 
-    Parseert de berichttekst, slaat de observatie op en stuurt een bevestiging.
-    Bij een falende Markdown-reply wordt een plain-text fallback geprobeerd zodat
-    de operator altijd feedback krijgt dat de opslag geslaagd is.
+    Parses the message text, saves the observation and sends a confirmation.
+    On a failing Markdown reply, a plain-text fallback is attempted so that
+    the operator always gets feedback that the save succeeded.
     """
     message_text = update.message.text or ""
     parts = message_text.split(None, 1)
@@ -515,12 +513,12 @@ async def _save_observation_and_reply(
 
     if reflection is None:
         await update.message.reply_text(
-            "⛔ Database niet geconfigureerd (DATABASE\\_URL ontbreekt).",
+            "⛔ Database not configured (DATABASE\\_URL missing).",
             parse_mode="Markdown",
         )
         return
 
-    # Sla op en bevestig afzonderlijk zodat DB-fouten en reply-fouten niet worden vermengd
+    # Save and confirm separately so DB errors and reply errors are not mixed
     try:
         record_id = await reflection.log_observation(
             category=category,
@@ -528,51 +526,51 @@ async def _save_observation_and_reply(
             metadata={"telegram_user": update.effective_user.id},
         )
     except Exception as e:
-        logger.exception("%s opslaan mislukt: %s", success_label, e)
+        logger.exception("%s save failed: %s", success_label, e)
         await update.message.reply_text(
-            f"⛔ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
+            f"⛔ Error saving: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
         return
 
-    # Eerste poging: Markdown-reply
+    # First attempt: Markdown reply
     try:
         await update.message.reply_text(
-            f"{success_prefix} {success_label} opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
+            f"{success_prefix} {success_label} saved (id: {record_id})\n\n_{_escape_md(content)}_",
             parse_mode="Markdown",
         )
         return
     except Exception as e:
-        logger.exception("Markdown reply voor %s (id=%d) mislukt: %s", success_label, record_id, e)
+        logger.exception("Markdown reply for %s (id=%d) failed: %s", success_label, record_id, e)
 
-    # Fallback: plain-text reply zodat operator weet dat de opslag geslaagd is
+    # Fallback: plain-text reply so operator knows the save succeeded
     try:
         await update.message.reply_text(
-            f"{success_prefix} {success_label} opgeslagen (id: {record_id})."
+            f"{success_prefix} {success_label} saved (id: {record_id})."
         )
     except Exception as e:
-        logger.exception("Fallback reply voor %s (id=%d) ook mislukt: %s", success_label, record_id, e)
+        logger.exception("Fallback reply for %s (id=%d) also failed: %s", success_label, record_id, e)
 
 
 @operator_only
 async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:  # noqa: ARG001
-    """Sla een marktobservatie op."""
+    """Save a market observation."""
     await _save_observation_and_reply(
         update,
         category="market_observation",
-        usage_hint="📝 Gebruik: `/note [tekst]`\n\nVoorbeeld: `/note DXY loopt in supply zone op H4`",
+        usage_hint="📝 Usage: `/note [text]`\n\nExample: `/note DXY running into supply zone on H4`",
         success_prefix="✅",
-        success_label="Observatie",
+        success_label="Observation",
     )
 
 
 @operator_only
 async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:  # noqa: ARG001
-    """Sla een les op als 'lesson_learned'."""
+    """Save a lesson as 'lesson_learned'."""
     await _save_observation_and_reply(
         update,
         category="lesson_learned",
-        usage_hint="🎓 Gebruik: `/lesson [tekst]`\n\nVoorbeeld: `/lesson Nooit traden in eerste 5 min na NY open`",
+        usage_hint="🎓 Usage: `/lesson [text]`\n\nExample: `/lesson Never trade in the first 5 min after NY open`",
         success_prefix="🎓",
         success_label="Lesson learned",
     )
@@ -580,12 +578,12 @@ async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 @operator_only
 async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Toon de laatste 5 notities."""
+    """Show the last 5 notes."""
     reflection = _get_reflection_log()
 
     if reflection is None:
         await update.message.reply_text(
-            "❌ Database niet geconfigureerd (DATABASE\\_URL ontbreekt).",
+            "❌ Database not configured (DATABASE\\_URL missing).",
             parse_mode="Markdown",
         )
         return
@@ -593,33 +591,33 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         records = await reflection.get_recent(limit=5)
     except Exception as e:
-        logger.error("Notes ophalen mislukt: %s", e)
+        logger.error("Fetching notes failed: %s", e)
         await update.message.reply_text(
-            f"❌ Fout bij ophalen notities: `{_escape_md(type(e).__name__)}`",
+            f"❌ Error fetching notes: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
         )
         return
 
     if not records:
         await update.message.reply_text(
-            "📭 Nog geen notities opgeslagen.\n\n"
-            "Gebruik `/note` of `/lesson` om te beginnen.",
+            "📭 No notes saved yet.\n\n"
+            "Use `/note` or `/lesson` to get started.",
             parse_mode="Markdown",
         )
         return
 
-    lines = ["📋 *Laatste notities:*\n"]
+    lines = ["📋 *Latest notes:*\n"]
     category_emoji = {
-        "market_observation": "👁️",
+        "market_observation": "📊",
         "lesson_learned": "🎓",
-        "trade_setup": "📊",
-        "strategy_note": "📌",
+        "trade_setup": "📈",
+        "strategy_note": "📎",
     }
 
     for rec in records:
         emoji = category_emoji.get(rec["category"], "📝")
         cat = rec["category"].replace("_", " ").title()
-        # Timestamp: parse ISO8601 volledig (timezone-aware) en formatteer leesbaar
+        # Timestamp: parse ISO8601 fully (timezone-aware) and format readable
         ts = rec["created_at"]
         if isinstance(ts, str) and "T" in ts:
             try:
@@ -638,28 +636,45 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     response = "\n".join(lines)
     if len(response) > 3900:
-        response = response[:3900] + "\n\n_[afgekapt]_"
+        response = response[:3900] + "\n\n_[truncated]_"
 
     await update.message.reply_text(response, parse_mode="Markdown")
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # Unknown command handler
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 @operator_only
 async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "❓ Onbekend commando. Gebruik /help voor een overzicht."
+        "⬜ Unknown command. Use /help for an overview."
     )
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Global error handler
+# ─────────────────────────────────────────────────────────────────
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Catches all unexpected errors and logs them. Sends a notification to the operator."""
+    logger.error("Unexpected error: %s", context.error, exc_info=context.error)
+    if isinstance(update, Update) and update.effective_chat:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"❌ Unexpected error: {type(context.error).__name__}. It has been logged.",
+            )
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 def _escape_md(text: str) -> str:
-    """Escape special characters voor Telegram Markdown v1."""
+    """Escape special characters for Telegram Markdown v1."""
     # Escape backslash first to avoid double-escaping, then special chars
     text = text.replace("\\", "\\\\")
     for char in ["_", "*", "`", "[", "]"]:
@@ -667,43 +682,43 @@ def _escape_md(text: str) -> str:
     return text
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 async def _on_startup(app) -> None:
-    """Initialiseer services bij bot startup (vóór polling start)."""
+    """Initialize services at bot startup (before polling starts)."""
     reflection = _get_reflection_log()
     if reflection is not None:
         try:
             await reflection.initialize()
-            logger.info("ReflectionLog schema geïnitialiseerd bij startup")
+            logger.info("ReflectionLog schema initialized at startup")
         except Exception as e:
-            logger.warning("ReflectionLog initialisatie mislukt (DB down?): %s", e)
+            logger.warning("ReflectionLog initialization failed (DB down?): %s", e)
 
-    # Pre-warm de KnowledgeBase singleton zodat de eerste /ask of /explain
-    # geen cold-start vertraging heeft. Fouten zijn niet fataal — de bot
-    # start gewoon zonder pre-warmed KB.
+    # Pre-warm the KnowledgeBase singleton so the first /ask or /explain
+    # has no cold-start delay. Errors are not fatal — the bot starts fine
+    # without a pre-warmed KB.
     try:
         await asyncio.to_thread(_get_knowledge_base)
-        logger.info("KnowledgeBase singleton pre-warmed bij startup")
+        logger.info("KnowledgeBase singleton pre-warmed at startup")
     except Exception as e:
-        logger.warning("KnowledgeBase pre-warming mislukt (ChromaDB down?): %s", e)
+        logger.warning("KnowledgeBase pre-warming failed (ChromaDB down?): %s", e)
 
 
 def main() -> None:
-    """Start de Telegram bot."""
+    """Start the Telegram bot."""
     if not BOT_TOKEN:
-        raise ValueError("TELEGRAM_BOT_TOKEN niet ingesteld in environment variabelen")
+        raise ValueError("TELEGRAM_BOT_TOKEN not set in environment variables")
 
     if not OPERATOR_CHAT_ID:
-        raise ValueError("TELEGRAM_OPERATOR_CHAT_ID niet ingesteld in environment variabelen")
+        raise ValueError("TELEGRAM_OPERATOR_CHAT_ID not set in environment variables")
 
-    logger.info(f"Kaironis Bot v{agent_state['version']} wordt gestart...")
+    logger.info("Kaironis Bot v%s starting...", agent_state['version'])
 
     app = Application.builder().token(BOT_TOKEN).post_init(_on_startup).build()
 
-    # Commands registreren
+    # Register commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("status", cmd_status))
@@ -711,7 +726,7 @@ def main() -> None:
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("emergency", cmd_emergency))
 
-    # Memory Query
+    # Knowledge base
     app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CommandHandler("explain", cmd_explain))
 
@@ -720,7 +735,10 @@ def main() -> None:
     app.add_handler(CommandHandler("lesson", cmd_lesson))
     app.add_handler(CommandHandler("notes", cmd_notes))
 
-    logger.info("Bot gestart. Wachten op berichten...")
+    # Global error handler
+    app.add_error_handler(error_handler)
+
+    logger.info("Bot started. Waiting for messages...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

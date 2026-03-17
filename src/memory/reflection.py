@@ -1,25 +1,25 @@
 """
-Reflection & Learning System voor Kaironis.
+Reflection & Learning System for Kaironis.
 
-Slaat trade observaties, learnings en strategie-notities op in PostgreSQL.
-De search() methode gebruikt case-insensitive ILIKE-matching (substring zoeken).
+Stores trade observations, learnings and strategy notes in PostgreSQL.
+Full-text search via PostgreSQL ILIKE with wildcard injection protection.
 
 Example::
 
     log = ReflectionLog(dsn="postgresql://user:pass@localhost/kaironis")
-    await log.log_observation("lesson_learned", "Nooit traden in eerste 5 min na NY open")
+    await log.log_observation("lesson_learned", "Never trade in the first 5 min after NY open")
     recent = await log.get_recent(limit=5)
     hits = await log.search("NY open")
 
 Note:
-    De GIN trigram indexes (reflections_content_trgm_idx, reflections_category_trgm_idx)
-    vereisen de pg_trgm PostgreSQL-extensie. Deze extensie moet door een database-administrator
-    (superuser) vooraf aangemaakt worden::
+    The GIN trigram indexes (reflections_content_trgm_idx, reflections_category_trgm_idx)
+    require the pg_trgm PostgreSQL extension. This extension must be created by a database
+    administrator (superuser) in advance::
 
         docker exec kaironis-postgres psql -U postgres -d kaironis -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
 
-    Als de extensie niet beschikbaar is, worden de trigram indexes overgeslagen.
-    ILIKE-zoekopdrachten blijven functioneel, maar zonder de performance-optimalisatie van GIN indexes.
+    If the extension is not available, the trigram indexes are skipped.
+    ILIKE searches remain functional, but without the performance optimisation of GIN indexes.
 """
 
 import asyncio
@@ -32,7 +32,7 @@ import asyncpg
 
 logger = logging.getLogger(__name__)
 
-# Geldige categorieën
+# Valid categories
 VALID_CATEGORIES = frozenset([
     "trade_setup",
     "market_observation",
@@ -40,8 +40,8 @@ VALID_CATEGORIES = frozenset([
     "strategy_note",
 ])
 
-# DDL statements als expliciete tuple — vermijdt fragiel split(";") op embedded puntkomma's
-# Basisstructuur (geen superuser vereist)
+# DDL statements as explicit tuple — avoids fragile split(";") on embedded semicolons
+# Base structure (no superuser required)
 CREATE_TABLE_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS reflections (
@@ -56,25 +56,25 @@ CREATE_TABLE_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC)",
 )
 
-# GIN trigram indexes — vereisen pg_trgm extensie (superuser-rechten).
-# Worden alleen aangemaakt als de extensie beschikbaar is.
+# GIN trigram indexes — require pg_trgm extension (superuser rights).
+# Only created if the extension is available.
 TRGM_INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS reflections_content_trgm_idx ON reflections USING GIN (content gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS reflections_category_trgm_idx ON reflections USING GIN (category gin_trgm_ops)",
 )
 
-# Maximum aantal records dat get_recent() mag teruggeven
+# Maximum number of records that get_recent() may return
 MAX_LIMIT = 1000
 
 
 class ReflectionLog:
     """
-    Slaat trade observaties en learnings op in PostgreSQL.
+    Stores trade observations and learnings in PostgreSQL.
 
     Args:
         dsn: PostgreSQL connection string.
-             Voorbeeld: "postgresql://kaironis:secret@localhost/kaironis"
-        pool: Bestaand asyncpg connection pool (optioneel; overschrijft dsn).
+             Example: "postgresql://kaironis:secret@localhost/kaironis"
+        pool: Existing asyncpg connection pool (optional; overrides dsn).
     """
 
     def __init__(
@@ -84,44 +84,44 @@ class ReflectionLog:
     ) -> None:
         self._dsn = dsn
         self._pool: Optional[asyncpg.Pool] = pool
-        # Track of we de pool zelf aangemaakt hebben (True) of ge-injecteerd kregen (False).
-        # close() sluit alleen self-owned pools om externe pools niet te vernietigen.
+        # Track whether we created the pool ourselves (True) or received it injected (False).
+        # close() only closes self-owned pools to avoid destroying external pools.
         self._owns_pool: bool = pool is None
         self._pool_init_lock = asyncio.Lock()
 
     async def _get_pool(self) -> asyncpg.Pool:
-        """Lazy initialisatie van de connection pool (race-condition safe)."""
+        """Lazy initialization of the connection pool (race-condition safe)."""
         if self._pool is None:
             async with self._pool_init_lock:
                 if self._pool is None:
                     if not self._dsn:
-                        raise ValueError("Geen DSN opgegeven voor ReflectionLog")
+                        raise ValueError("No DSN provided for ReflectionLog")
                     self._pool = await asyncpg.create_pool(self._dsn)
         return self._pool
 
     async def initialize(self) -> None:
         """
-        Maak de tabel en indices aan als ze nog niet bestaan.
+        Create the table and indices if they do not exist yet.
 
-        Basis DDL (tabel + standaard indexes) wordt in één transactie uitgevoerd.
-        GIN trigram indexes worden daarna geprobeerd; als pg_trgm niet beschikbaar
-        is, wordt een waarschuwing gelogd en de rest van de startup gaat door.
+        Base DDL (table + standard indexes) is executed in one transaction.
+        GIN trigram indexes are attempted afterwards; if pg_trgm is not available,
+        a warning is logged and the rest of startup continues.
 
-        Tip: pre-create pg_trgm in productie::
+        Tip: pre-create pg_trgm in production::
 
             docker exec kaironis-postgres psql -U postgres -d kaironis \\
                 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            # Basisstructuur atomisch in één transactie
+            # Base structure atomically in one transaction
             async with conn.transaction():
                 for statement in CREATE_TABLE_STATEMENTS:
                     stmt = statement.strip()
                     if stmt:
                         await conn.execute(stmt)
 
-            # Trigram indexes optioneel — vereisen pg_trgm extensie
+            # Trigram indexes optional — require pg_trgm extension
             for statement in TRGM_INDEX_STATEMENTS:
                 stmt = statement.strip()
                 if stmt:
@@ -129,24 +129,24 @@ class ReflectionLog:
                         await conn.execute(stmt)
                     except asyncpg.UndefinedObjectError:
                         logger.warning(
-                            "pg_trgm extensie niet beschikbaar — trigram index overgeslagen. "
-                            "Pre-create de extensie voor betere ILIKE performance: "
+                            "pg_trgm extension not available — trigram index skipped. "
+                            "Pre-create the extension for better ILIKE performance: "
                             "docker exec kaironis-postgres psql -U postgres -d kaironis "
                             "-c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\""
                         )
-                        break  # Beide indexes vereisen pg_trgm; één warning is genoeg
+                        break  # Both indexes require pg_trgm; one warning is enough
 
-        logger.info("ReflectionLog tabel geïnitialiseerd")
+        logger.info("ReflectionLog table initialized")
 
     async def close(self) -> None:
-        """Sluit de connection pool — alleen als we hem zelf aangemaakt hebben."""
+        """Close the connection pool — only if we created it ourselves."""
         if self._pool is not None and self._owns_pool:
             await self._pool.close()
             self._pool = None
 
-    # ─────────────────────────────────────────────
-    # Schrijven
-    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
+    # Write
+    # ─────────────────────────────────────────────────────────────────
 
     async def log_observation(
         self,
@@ -155,19 +155,19 @@ class ReflectionLog:
         metadata: Optional[dict[str, Any]] = None,
     ) -> int:
         """
-        Sla een observatie of learning op.
+        Store an observation or learning.
 
         Args:
-            category: Eén van: trade_setup, market_observation,
+            category: One of: trade_setup, market_observation,
                       lesson_learned, strategy_note.
-            content: De tekst van de observatie.
-            metadata: Optionele extra data als dict (wordt opgeslagen als JSONB).
+            content: The text of the observation.
+            metadata: Optional extra data as dict (stored as JSONB).
 
         Returns:
-            Het nieuwe record ID.
+            The new record ID.
 
         Raises:
-            ValueError: Als category ongeldig is of content leeg.
+            ValueError: If category is invalid or content is empty.
         """
         if not isinstance(category, str):
             raise TypeError(
@@ -183,13 +183,13 @@ class ReflectionLog:
             )
         if category not in VALID_CATEGORIES:
             raise ValueError(
-                f"Ongeldige categorie '{category}'. "
-                f"Gebruik een van: {', '.join(sorted(VALID_CATEGORIES))}"
+                f"Invalid category '{category}'. "
+                f"Use one of: {', '.join(sorted(VALID_CATEGORIES))}"
             )
 
         content = content.strip()
         if not content:
-            raise ValueError("Content mag niet leeg zijn")
+            raise ValueError("Content must not be empty")
 
         pool = await self._get_pool()
         async with pool.acquire() as conn:
@@ -206,14 +206,14 @@ class ReflectionLog:
 
         record_id: int = row["id"]
         logger.info(
-            "Observatie opgeslagen: id=%d category=%s chars=%d",
+            "Observation stored: id=%d category=%s chars=%d",
             record_id, category, len(content)
         )
         return record_id
 
-    # ─────────────────────────────────────────────
-    # Lezen
-    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
+    # Read
+    # ─────────────────────────────────────────────────────────────────
 
     async def get_recent(
         self,
@@ -221,20 +221,20 @@ class ReflectionLog:
         category: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
-        Haal de meest recente observaties op.
+        Retrieve the most recent observations.
 
         Args:
-            limit: Maximum aantal records (default: 10). Must be >= 1 and <= MAX_LIMIT.
-            category: Filter op categorie (optioneel). Moet een van VALID_CATEGORIES zijn.
+            limit: Maximum number of records (default: 10). Must be >= 1 and <= MAX_LIMIT.
+            category: Filter by category (optional). Must be one of VALID_CATEGORIES.
 
         Returns:
-            Lijst van dicts met id, category, content, metadata, created_at.
+            List of dicts with id, category, content, metadata, created_at.
 
         Raises:
-            TypeError: Als limit geen integer is (of een bool).
-            ValueError: Als limit buiten het bereik [1, MAX_LIMIT] valt.
-            TypeError: Als category geen string is.
-            ValueError: Als category niet in VALID_CATEGORIES zit.
+            TypeError: If limit is not an integer (or is a bool).
+            ValueError: If limit is outside the range [1, MAX_LIMIT].
+            TypeError: If category is not a string.
+            ValueError: If category is not in VALID_CATEGORIES.
         """
         if not isinstance(limit, int) or isinstance(limit, bool):
             raise TypeError(
@@ -252,8 +252,8 @@ class ReflectionLog:
                 )
             if category not in VALID_CATEGORIES:
                 raise ValueError(
-                    f"Ongeldige categorie '{category}'. "
-                    f"Gebruik een van: {', '.join(sorted(VALID_CATEGORIES))}"
+                    f"Invalid category '{category}'. "
+                    f"Use one of: {', '.join(sorted(VALID_CATEGORIES))}"
                 )
 
         pool = await self._get_pool()
@@ -285,18 +285,18 @@ class ReflectionLog:
 
     async def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """
-        Full-text zoeken in PostgreSQL via ILIKE (portable, geen tsvector setup nodig).
+        Full-text search in PostgreSQL via ILIKE (portable, no tsvector setup needed).
 
         Args:
-            query: Zoekterm(en).
-            limit: Maximum aantal resultaten (default: 20). Must be >= 1 and <= MAX_LIMIT.
+            query: Search term(s).
+            limit: Maximum number of results (default: 20). Must be >= 1 and <= MAX_LIMIT.
 
         Returns:
-            Lijst van matching dicts, gesorteerd op datum (meest recent eerst).
+            List of matching dicts, sorted by date (most recent first).
 
         Raises:
-            TypeError: Als query geen string is of limit geen integer.
-            ValueError: Als limit buiten het bereik [1, MAX_LIMIT] valt.
+            TypeError: If query is not a string or limit is not an integer.
+            ValueError: If limit is outside the range [1, MAX_LIMIT].
         """
         if not isinstance(query, str):
             raise TypeError(f"query must be a string, got {type(query).__name__!r}")
@@ -330,18 +330,18 @@ class ReflectionLog:
                 limit,
             )
 
-        # Log geanonimiseerde query (eerste 4 tekens + "...") om reflection-data niet te lekken
+        # Log anonymised query (first 4 chars + "...") to avoid leaking reflection data
         masked_query = query[:4] + "..." if len(query) > 4 else "***"
-        logger.debug("Search '%s' (len=%d): %d resultaten", masked_query, len(query), len(rows))
+        logger.debug("Search '%s' (len=%d): %d results", masked_query, len(query), len(rows))
         return [_row_to_dict(row) for row in rows]
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
 def _row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
-    """Converteer een asyncpg Record naar een plain dict."""
+    """Convert an asyncpg Record to a plain dict."""
     metadata = row["metadata"]
     if isinstance(metadata, str):
         try:
