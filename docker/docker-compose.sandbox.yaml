@@ -1,8 +1,7 @@
 services:
   kaironis-bot:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    # Update deze tag bij elke release naar de nieuwe versie (bijv. 0.4.0)
+    image: kaironis-bot:0.3.0
     env_file:
       - ../.env
     environment:
@@ -15,11 +14,27 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - REDIS_HOST=docker-redis-1
       - REDIS_PORT=6379
-      - CHROMA_HOST=docker-chromadb-1
-      - CHROMA_PORT=8000
+      - CHROMADB_HOST=docker-chromadb-1
+      - CHROMADB_PORT=8000
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_PORT=11434
       - ENVIRONMENT=sandbox
       - LOG_LEVEL=DEBUG
-    network_mode: host
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python.*bot' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - app-net
+      - docker_default
     restart: unless-stopped
     volumes:
       - ../logs:/app/logs
+
+networks:
+  app-net:
+    external: true
+  docker_default:
+    external: true

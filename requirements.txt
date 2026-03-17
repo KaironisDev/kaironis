@@ -6,9 +6,11 @@ psycopg2-binary
 sqlalchemy==2.0
 redis
 
-# Vector DB & Embeddings (optioneel - zie requirements-ml.txt)
-# chromadb           # zware dependency, apart installeren
-# sentence-transformers  # zware dependency, apart installeren
+# Vector DB & Embeddings
+chromadb
+
+# Async DB
+asyncpg
 
 # SSH tunneling
 paramiko
@@ -16,6 +18,9 @@ paramiko
 # Trading / Brokers
 # hyperliquid-python-sdk  # uncomment when ready
 # MetaTrader5             # uncomment when ready (Windows only)
+
+# HTTP client
+requests
 
 # Utils
 pyyaml

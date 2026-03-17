@@ -10,13 +10,23 @@ Example::
     await log.log_observation("lesson_learned", "Never trade in the first 5 min after NY open")
     recent = await log.get_recent(limit=5)
     hits = await log.search("NY open")
+
+Note:
+    The GIN trigram indexes (reflections_content_trgm_idx, reflections_category_trgm_idx)
+    require the pg_trgm PostgreSQL extension. This extension must be created by a database
+    administrator (superuser) in advance::
+
+        docker exec kaironis-postgres psql -U postgres -d kaironis -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
+    If the extension is not available, the trigram indexes are skipped.
+    ILIKE searches remain functional, but without the performance optimisation of GIN indexes.
 """
 
 import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import asyncpg
 
@@ -30,17 +40,31 @@ VALID_CATEGORIES = frozenset([
     "strategy_note",
 ])
 
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS reflections (
-    id SERIAL PRIMARY KEY,
-    category VARCHAR(50) NOT NULL,
-    content TEXT NOT NULL,
-    metadata JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category);
-CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC);
-"""
+# DDL statements as explicit tuple — avoids fragile split(";") on embedded semicolons
+# Base structure (no superuser required)
+CREATE_TABLE_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS reflections (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        metadata JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category)",
+    "CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC)",
+)
+
+# GIN trigram indexes — require pg_trgm extension (superuser rights).
+# Only created if the extension is available.
+TRGM_INDEX_STATEMENTS = (
+    "CREATE INDEX IF NOT EXISTS reflections_content_trgm_idx ON reflections USING GIN (content gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS reflections_category_trgm_idx ON reflections USING GIN (category gin_trgm_ops)",
+)
+
+# Maximum number of records that get_recent() may return
+MAX_LIMIT = 1000
 
 
 class ReflectionLog:
@@ -60,6 +84,9 @@ class ReflectionLog:
     ) -> None:
         self._dsn = dsn
         self._pool: Optional[asyncpg.Pool] = pool
+        # Track whether we created the pool ourselves (True) or received it injected (False).
+        # close() only closes self-owned pools to avoid destroying external pools.
+        self._owns_pool: bool = pool is None
         self._pool_init_lock = asyncio.Lock()
 
     async def _get_pool(self) -> asyncpg.Pool:
@@ -73,42 +100,59 @@ class ReflectionLog:
         return self._pool
 
     async def initialize(self) -> None:
-        """Create the table and indices if they do not exist yet."""
+        """
+        Create the table and indices if they do not exist yet.
+
+        Base DDL (table + standard indexes) is executed in one transaction.
+        GIN trigram indexes are attempted afterwards; if pg_trgm is not available,
+        a warning is logged and the rest of startup continues.
+
+        Tip: pre-create pg_trgm in production::
+
+            docker exec kaironis-postgres psql -U postgres -d kaironis \\
+                -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+        """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            # Execute statements individually
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS reflections (
-                    id SERIAL PRIMARY KEY,
-                    category VARCHAR(50) NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata JSONB,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                )
-            """)
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC)"
-            )
+            # Base structure atomically in one transaction
+            async with conn.transaction():
+                for statement in CREATE_TABLE_STATEMENTS:
+                    stmt = statement.strip()
+                    if stmt:
+                        await conn.execute(stmt)
+
+            # Trigram indexes optional — require pg_trgm extension
+            for statement in TRGM_INDEX_STATEMENTS:
+                stmt = statement.strip()
+                if stmt:
+                    try:
+                        await conn.execute(stmt)
+                    except asyncpg.UndefinedObjectError:
+                        logger.warning(
+                            "pg_trgm extension not available — trigram index skipped. "
+                            "Pre-create the extension for better ILIKE performance: "
+                            "docker exec kaironis-postgres psql -U postgres -d kaironis "
+                            "-c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\""
+                        )
+                        break  # Both indexes require pg_trgm; one warning is enough
+
         logger.info("ReflectionLog table initialized")
 
     async def close(self) -> None:
-        """Close the connection pool."""
-        if self._pool:
+        """Close the connection pool — only if we created it ourselves."""
+        if self._pool is not None and self._owns_pool:
             await self._pool.close()
             self._pool = None
 
-    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Write
-    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
 
     async def log_observation(
         self,
         category: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> int:
         """
         Store an observation or learning.
@@ -125,6 +169,18 @@ class ReflectionLog:
         Raises:
             ValueError: If category is invalid or content is empty.
         """
+        if not isinstance(category, str):
+            raise TypeError(
+                f"category must be a string, got {type(category).__name__!r}"
+            )
+        if not isinstance(content, str):
+            raise TypeError(
+                f"content must be a string, got {type(content).__name__!r}"
+            )
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError(
+                f"metadata must be a dict or None, got {type(metadata).__name__!r}"
+            )
         if category not in VALID_CATEGORIES:
             raise ValueError(
                 f"Invalid category '{category}'. "
@@ -145,7 +201,7 @@ class ReflectionLog:
                 """,
                 category,
                 content,
-                json.dumps(metadata) if metadata else None,
+                json.dumps(metadata) if metadata is not None else None,
             )
 
         record_id: int = row["id"]
@@ -155,25 +211,51 @@ class ReflectionLog:
         )
         return record_id
 
-    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
     # Read
-    # ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
 
     async def get_recent(
         self,
         limit: int = 10,
         category: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Retrieve the most recent observations.
 
         Args:
-            limit: Maximum number of records (default: 10).
-            category: Filter by category (optional).
+            limit: Maximum number of records (default: 10). Must be >= 1 and <= MAX_LIMIT.
+            category: Filter by category (optional). Must be one of VALID_CATEGORIES.
 
         Returns:
             List of dicts with id, category, content, metadata, created_at.
+
+        Raises:
+            TypeError: If limit is not an integer (or is a bool).
+            ValueError: If limit is outside the range [1, MAX_LIMIT].
+            TypeError: If category is not a string.
+            ValueError: If category is not in VALID_CATEGORIES.
         """
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise TypeError(
+                f"limit must be an integer >= 1, got {type(limit).__name__!r}"
+            )
+        if limit < 1:
+            raise ValueError(f"limit must be >= 1, got {limit}")
+        if limit > MAX_LIMIT:
+            raise ValueError(f"limit must be <= {MAX_LIMIT}, got {limit}")
+
+        if category is not None:
+            if not isinstance(category, str):
+                raise TypeError(
+                    f"category must be a string, got {type(category).__name__!r}"
+                )
+            if category not in VALID_CATEGORIES:
+                raise ValueError(
+                    f"Invalid category '{category}'. "
+                    f"Use one of: {', '.join(sorted(VALID_CATEGORIES))}"
+                )
+
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             if category:
@@ -201,16 +283,32 @@ class ReflectionLog:
 
         return [_row_to_dict(row) for row in rows]
 
-    async def search(self, query: str) -> List[Dict[str, Any]]:
+    async def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """
         Full-text search in PostgreSQL via ILIKE (portable, no tsvector setup needed).
 
         Args:
             query: Search term(s).
+            limit: Maximum number of results (default: 20). Must be >= 1 and <= MAX_LIMIT.
 
         Returns:
             List of matching dicts, sorted by date (most recent first).
+
+        Raises:
+            TypeError: If query is not a string or limit is not an integer.
+            ValueError: If limit is outside the range [1, MAX_LIMIT].
         """
+        if not isinstance(query, str):
+            raise TypeError(f"query must be a string, got {type(query).__name__!r}")
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise TypeError(
+                f"limit must be an integer >= 1, got {type(limit).__name__!r}"
+            )
+        if limit < 1:
+            raise ValueError(f"limit must be >= 1, got {limit}")
+        if limit > MAX_LIMIT:
+            raise ValueError(f"limit must be <= {MAX_LIMIT}, got {limit}")
+
         query = query.strip()
         if not query:
             return []
@@ -226,20 +324,23 @@ class ReflectionLog:
                 FROM reflections
                 WHERE content ILIKE $1 ESCAPE '\\' OR category ILIKE $1 ESCAPE '\\'
                 ORDER BY created_at DESC
-                LIMIT 20
+                LIMIT $2
                 """,
                 pattern,
+                limit,
             )
 
-        logger.debug("Search '%s': %d results", query, len(rows))
+        # Log anonymised query (first 4 chars + "...") to avoid leaking reflection data
+        masked_query = query[:4] + "..." if len(query) > 4 else "***"
+        logger.debug("Search '%s' (len=%d): %d results", masked_query, len(query), len(rows))
         return [_row_to_dict(row) for row in rows]
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 
-def _row_to_dict(row: asyncpg.Record) -> Dict[str, Any]:
+def _row_to_dict(row: asyncpg.Record) -> dict[str, Any]:
     """Convert an asyncpg Record to a plain dict."""
     metadata = row["metadata"]
     if isinstance(metadata, str):
