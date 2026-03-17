@@ -134,6 +134,10 @@ class ReflectionLog:
             raise TypeError(
                 f"content must be a string, got {type(content).__name__!r}"
             )
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError(
+                f"metadata must be a dict or None, got {type(metadata).__name__!r}"
+            )
         if category not in VALID_CATEGORIES:
             raise ValueError(
                 f"Ongeldige categorie '{category}'. "

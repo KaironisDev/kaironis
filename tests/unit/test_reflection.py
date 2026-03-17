@@ -56,7 +56,7 @@ def make_mock_row(
         "id": id,
         "category": category,
         "content": content,
-        "metadata": json.dumps(metadata) if metadata else None,
+        "metadata": json.dumps(metadata) if metadata is not None else None,
         "created_at": created_at or datetime(2026, 3, 15, 12, 0, 0),
     }[key]
     return row
@@ -126,6 +126,22 @@ class TestLogObservation:
         await log.log_observation("market_observation", "DXY bearish")
         call_args = mock_conn.fetchrow.call_args[0]
         assert call_args[3] is None
+
+    @pytest.mark.asyncio
+    async def test_metadata_list_raises_typeerror(self):
+        """metadata als list moet een TypeError gooien."""
+        mock_pool, _ = make_mock_pool()
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(TypeError, match="metadata must be a dict or None"):
+            await log.log_observation("lesson_learned", "Test", metadata=["a", "b"])
+
+    @pytest.mark.asyncio
+    async def test_metadata_string_raises_typeerror(self):
+        """metadata als string moet een TypeError gooien."""
+        mock_pool, _ = make_mock_pool()
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(TypeError, match="metadata must be a dict or None"):
+            await log.log_observation("lesson_learned", "Test", metadata="niet-een-dict")
 
 
 # ─────────────────────────────────────────────
@@ -252,6 +268,19 @@ class TestSearch:
         log = ReflectionLog(pool=mock_pool)
         await log.search("")
         mock_conn.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_search_escapes_percent_and_underscore(self):
+        """Wildcards % en _ in de query moeten letterlijk behandeld worden via ESCAPE '\\'."""
+        mock_pool, mock_conn = make_mock_pool(rows=[])
+        log = ReflectionLog(pool=mock_pool)
+        await log.search("PO3_50%")
+
+        args = mock_conn.fetch.call_args[0]
+        # SQL moet ESCAPE '\\' bevatten
+        assert "ESCAPE" in args[0]
+        # Pattern arg: % en _ zijn geëscaped
+        assert args[1] == r"%PO3\_50\%%"
 
 
 # ─────────────────────────────────────────────
