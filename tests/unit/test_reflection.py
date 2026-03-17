@@ -143,6 +143,24 @@ class TestLogObservation:
         with pytest.raises(TypeError, match="metadata must be a dict or None"):
             await log.log_observation("lesson_learned", "Test", metadata="niet-een-dict")
 
+    @pytest.mark.asyncio
+    async def test_log_observation_propagates_db_error(self):
+        """DB-fout in fetchrow moet propageren naar de aanroeper."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_conn.fetchrow.side_effect = RuntimeError("db down")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(RuntimeError, match="db down"):
+            await log.log_observation("lesson_learned", "Test content")
+
+    @pytest.mark.asyncio
+    async def test_log_observation_propagates_acquire_error(self):
+        """Pool.acquire() fout moet propageren naar de aanroeper."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_pool.acquire.side_effect = ConnectionError("pool exhausted")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(ConnectionError, match="pool exhausted"):
+            await log.log_observation("lesson_learned", "Test content")
+
 
 # ─────────────────────────────────────────────
 # Tests: ReflectionLog.get_recent
@@ -175,10 +193,12 @@ class TestGetRecent:
         log = ReflectionLog(pool=mock_pool)
         await log.get_recent(limit=5, category="lesson_learned")
 
-        # Met category filter wordt fetch aangeroepen met 2 params
+        # Met category filter: (sql, category, limit) → 3 positional args
         call_args = mock_conn.fetch.call_args[0]
-        # Eerste arg is de SQL, tweede is de category
-        assert "lesson_learned" in call_args
+        assert len(call_args) == 3
+        assert isinstance(call_args[0], str)   # SQL string
+        assert call_args[1] == "lesson_learned"  # category op positie 1
+        assert call_args[2] == 5                 # limit op positie 2
 
     @pytest.mark.asyncio
     async def test_no_filter_query_has_one_param(self):
@@ -186,9 +206,11 @@ class TestGetRecent:
         log = ReflectionLog(pool=mock_pool)
         await log.get_recent(limit=7)
 
+        # Zonder category: (sql, limit) → 2 positional args
         call_args = mock_conn.fetch.call_args[0]
-        # Geen category, dus alleen de limit parameter
-        assert 7 in call_args
+        assert len(call_args) == 2
+        assert isinstance(call_args[0], str)  # SQL string
+        assert call_args[1] == 7              # limit op positie 1
 
     @pytest.mark.asyncio
     async def test_invalid_limit_type_raises_typeerror(self):
@@ -218,6 +240,24 @@ class TestGetRecent:
         log = ReflectionLog(pool=mock_pool)
         with pytest.raises(ValueError, match=f"limit must be <= {MAX_LIMIT}"):
             await log.get_recent(limit=MAX_LIMIT + 1)
+
+    @pytest.mark.asyncio
+    async def test_get_recent_propagates_db_error(self):
+        """DB-fout in fetch moet propageren naar de aanroeper."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_conn.fetch.side_effect = RuntimeError("db down")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(RuntimeError, match="db down"):
+            await log.get_recent()
+
+    @pytest.mark.asyncio
+    async def test_get_recent_propagates_acquire_error(self):
+        """Pool.acquire() fout in get_recent moet propageren."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_pool.acquire.side_effect = ConnectionError("pool exhausted")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(ConnectionError, match="pool exhausted"):
+            await log.get_recent()
 
     @pytest.mark.asyncio
     async def test_datetime_converted_to_isoformat(self):
@@ -265,9 +305,12 @@ class TestSearch:
         log = ReflectionLog(pool=mock_pool)
         await log.search("supply zone")
 
+        # (sql, pattern, limit) → 3 positional args
         call_args = mock_conn.fetch.call_args[0]
-        # Pattern moet %supply zone% zijn
-        assert "%supply zone%" in call_args
+        assert len(call_args) == 3
+        assert isinstance(call_args[0], str)         # SQL string
+        assert call_args[1] == "%supply zone%"        # pattern op positie 1
+        assert call_args[2] == 20                     # default limit op positie 2
 
     @pytest.mark.asyncio
     async def test_no_db_call_on_empty_query(self):
@@ -275,6 +318,24 @@ class TestSearch:
         log = ReflectionLog(pool=mock_pool)
         await log.search("")
         mock_conn.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_search_propagates_db_error(self):
+        """DB-fout in fetch tijdens search moet propageren naar de aanroeper."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_conn.fetch.side_effect = RuntimeError("db down")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(RuntimeError, match="db down"):
+            await log.search("PO3")
+
+    @pytest.mark.asyncio
+    async def test_search_propagates_acquire_error(self):
+        """Pool.acquire() fout in search moet propageren."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_pool.acquire.side_effect = ConnectionError("pool exhausted")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(ConnectionError, match="pool exhausted"):
+            await log.search("PO3")
 
     @pytest.mark.asyncio
     async def test_search_escapes_percent_and_underscore(self):
@@ -336,6 +397,28 @@ class TestInitialize:
         log = ReflectionLog(pool=mock_pool)
         # Mag niet crashen
         await log.initialize()
+
+    @pytest.mark.asyncio
+    async def test_initialize_propagates_unexpected_db_error(self):
+        """Een onverwachte DB-fout (niet UndefinedObjectError) moet propageren."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_transaction = MagicMock()
+        mock_transaction.__aenter__ = AsyncMock(return_value=None)
+        mock_transaction.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+        mock_conn.execute.side_effect = RuntimeError("disk full")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(RuntimeError, match="disk full"):
+            await log.initialize()
+
+    @pytest.mark.asyncio
+    async def test_initialize_propagates_acquire_error(self):
+        """Pool.acquire() fout in initialize moet propageren."""
+        mock_pool, mock_conn = make_mock_pool()
+        mock_pool.acquire.side_effect = ConnectionError("pool exhausted")
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(ConnectionError, match="pool exhausted"):
+            await log.initialize()
 
 
 # ─────────────────────────────────────────────
