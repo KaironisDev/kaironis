@@ -24,4 +24,8 @@ RUN mkdir -p /app/logs
 RUN useradd -m -u 1000 kaironis && chown -R kaironis:kaironis /app
 USER kaironis
 
+# Health check — verifies the bot process is alive
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD pgrep -f "src.orchestration.bot" || exit 1
+
 CMD ["python", "-m", "src.orchestration.bot"]

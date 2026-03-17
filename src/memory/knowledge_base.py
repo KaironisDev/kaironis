@@ -368,10 +368,10 @@ def _expand_tct_query(query: str) -> str:
     import re
     expanded = query
     for abbr, full in _TCT_ABBREVIATIONS.items():
-        # Match whole-word abbreviation (case-sensitive, not already followed by full form)
+        # Case-insensitive whole-word match so "bos", "BOS", "Bos" all expand.
         pattern = rf'\b{re.escape(abbr)}\b'
-        if re.search(pattern, expanded) and full.lower() not in expanded.lower():
-            expanded = re.sub(pattern, f"{abbr} {full}", expanded)
+        if re.search(pattern, expanded, re.IGNORECASE) and full.lower() not in expanded.lower():
+            expanded = re.sub(pattern, f"{abbr} {full}", expanded, flags=re.IGNORECASE)
     if expanded != query:
         logger.debug("Query expanded: %r -> %r", query, expanded)
     return expanded
