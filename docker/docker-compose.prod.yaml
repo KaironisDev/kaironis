@@ -36,9 +36,7 @@ services:
     restart: always
 
   kaironis-bot:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: kaironis-bot:latest
     env_file:
       - ../.env
     environment:
@@ -51,10 +49,18 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - CHROMA_HOST=chromadb
-      - CHROMA_PORT=8000
+      - CHROMADB_HOST=chromadb
+      - CHROMADB_PORT=8000
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/kaironis_healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
