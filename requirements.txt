@@ -1,20 +1,31 @@
 # Core
 python-telegram-bot==21.0
-asyncio
 
 # Database
 psycopg2-binary
 sqlalchemy==2.0
 redis
 
-# Vector DB
+# Vector DB & Embeddings
 chromadb
+
+# Async DB
+asyncpg
+
+# SSH tunneling
+paramiko
 
 # Trading / Brokers
 # hyperliquid-python-sdk  # uncomment when ready
 # MetaTrader5             # uncomment when ready (Windows only)
 
+# HTTP client
+requests
+
 # Utils
 pyyaml
 python-dotenv
 structlog
+
+# PDF to image conversion
+pdf2image

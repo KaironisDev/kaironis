@@ -1,6 +1,4 @@
-version: '3.9'
-
-services:
+﻿services:
   postgres:
     image: postgres:15-alpine
     environment:
@@ -30,3 +28,4 @@ services:
 volumes:
   postgres_data:
   chroma_data:
+
