@@ -126,6 +126,14 @@ class ReflectionLog:
         Raises:
             ValueError: Als category ongeldig is of content leeg.
         """
+        if not isinstance(category, str):
+            raise TypeError(
+                f"category must be a string, got {type(category).__name__!r}"
+            )
+        if not isinstance(content, str):
+            raise TypeError(
+                f"content must be a string, got {type(content).__name__!r}"
+            )
         if category not in VALID_CATEGORIES:
             raise ValueError(
                 f"Ongeldige categorie '{category}'. "

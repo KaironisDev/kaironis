@@ -681,6 +681,15 @@ async def _on_startup(app) -> None:
         except Exception as e:
             logger.warning("ReflectionLog initialisatie mislukt (DB down?): %s", e)
 
+    # Pre-warm de KnowledgeBase singleton zodat de eerste /ask of /explain
+    # geen cold-start vertraging heeft. Fouten zijn niet fataal — de bot
+    # start gewoon zonder pre-warmed KB.
+    try:
+        await asyncio.to_thread(_get_knowledge_base)
+        logger.info("KnowledgeBase singleton pre-warmed bij startup")
+    except Exception as e:
+        logger.warning("KnowledgeBase pre-warming mislukt (ChromaDB down?): %s", e)
+
 
 def main() -> None:
     """Start de Telegram bot."""
