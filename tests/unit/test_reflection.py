@@ -221,12 +221,12 @@ class TestGetRecent:
 
     @pytest.mark.asyncio
     async def test_datetime_converted_to_isoformat(self):
-        dt = datetime(2026, 3, 15, 9, 30, 0)
+        dt = datetime(2026, 3, 15, 9, 30, 0, tzinfo=timezone.utc)
         rows = [make_mock_row(row_id=1, content="test", created_at=dt)]
         mock_pool, _ = make_mock_pool(rows=rows)
         log = ReflectionLog(pool=mock_pool)
         result = await log.get_recent()
-        assert result[0]["created_at"] == "2026-03-15T09:30:00"
+        assert result[0]["created_at"] == "2026-03-15T09:30:00+00:00"
 
 
 # ─────────────────────────────────────────────
