@@ -238,7 +238,7 @@ class ReflectionLog:
         """
         if not isinstance(limit, int) or isinstance(limit, bool):
             raise TypeError(
-                f"limit must be an integer >= 1, got {type(limit).__name__}"
+                f"limit must be an integer >= 1, got {type(limit).__name__!r}"
             )
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
@@ -302,7 +302,7 @@ class ReflectionLog:
             raise TypeError(f"query must be a string, got {type(query).__name__!r}")
         if not isinstance(limit, int) or isinstance(limit, bool):
             raise TypeError(
-                f"limit must be an integer >= 1, got {type(limit).__name__}"
+                f"limit must be an integer >= 1, got {type(limit).__name__!r}"
             )
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")

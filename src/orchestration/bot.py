@@ -470,7 +470,7 @@ ANSWER:"""
 
     # Step 4: Send response
     sources = ", ".join(
-        {r.get("metadata", {}).get("filename", "?").replace(".md", "") for r in chunks}
+        {r.get("metadata", {}).get("filename", "?").replace(".md", "") for r in chunks}  # set comprehension
     )
     header = f"🤖 {question}\n\n"
     footer = f"\n\nSources: {sources}"
