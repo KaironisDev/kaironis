@@ -76,14 +76,14 @@ def test_describe_image_returns_description():
 # Test 2: describe_image — lege/tekst pagina's worden overgeslagen
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_describe_image_skips_short_response():
-    """describe_image geeft None terug als de response < 50 tekens is."""
-    short_responses = [
-        "Geen visuele content.",          # 22 tekens
-        "OK",                             # 2 tekens
-        "Pagina is leeg.",                # 16 tekens
-        "Geen visuele trading content",   # 30 tekens
-        "",                               # 0 tekens
+def test_describe_image_skips_no_content_phrases():
+    """describe_image returns None when the model signals no visual trading content."""
+    no_content_responses = [
+        "Geen visuele trading content",        # exact phrase
+        "Deze pagina heeft geen visuele trading content.",
+        "Lege pagina zonder grafieken.",        # "lege pagina" phrase
+        "This page has no visual trading content.",
+        "Alleen tekst, geen grafieken.",        # "alleen tekst" phrase
     ]
 
     with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
@@ -91,17 +91,17 @@ def test_describe_image_skips_short_response():
         import ingest_images
         importlib.reload(ingest_images)
 
-        for short_text in short_responses:
+        for response_text in no_content_responses:
             mock_response = MagicMock()
-            mock_response.json.return_value = make_openrouter_response(short_text)
+            mock_response.json.return_value = make_openrouter_response(response_text)
             mock_response.raise_for_status = MagicMock()
 
             with patch("requests.post", return_value=mock_response):
                 result = ingest_images.describe_image(FAKE_PNG_BYTES, "doc.pdf", 1)
 
             assert result is None, (
-                f"Verwachtte None voor response van {len(short_text)} tekens, "
-                f"kreeg: {result!r}"
+                f"Expected None for no-content response {response_text!r}, "
+                f"got: {result!r}"
             )
 
 

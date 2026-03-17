@@ -140,8 +140,8 @@ def describe_image(image_bytes: bytes, filename: str, page_num: int) -> Optional
         page_num: Paginanummer (voor prompt context)
 
     Returns:
-        Beschrijving van de visuele content, of None als er geen
-        visuele trading content is (response < 50 tekens).
+        Beschrijving van de visuele content, of None als de pagina
+        geen visuele trading content bevat.
     """
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is niet ingesteld")
@@ -186,8 +186,19 @@ def describe_image(image_bytes: bytes, filename: str, page_num: int) -> Optional
     data = response.json()
     description = data["choices"][0]["message"]["content"].strip()
 
-    if len(description) < 50:
-        log.debug(f"  Pagina {page_num}: te kort ({len(description)} tekens) → overgeslagen")
+    # Check for explicit "no visual content" signal from the model.
+    # Using a phrase match instead of a length threshold avoids discarding
+    # short but high-signal descriptions (e.g. a concise PO3/BOS summary).
+    NO_CONTENT_PHRASES = [
+        "geen visuele trading content",
+        "no visual trading content",
+        "geen visuele content",
+        "lege pagina",
+        "alleen tekst",
+    ]
+    description_lower = description.lower()
+    if any(phrase in description_lower for phrase in NO_CONTENT_PHRASES):
+        log.debug(f"  Page {page_num}: no visual trading content → skipped")
         return None
 
     return description

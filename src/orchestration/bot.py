@@ -32,7 +32,7 @@ from functools import wraps
 from urllib.parse import quote_plus
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Structured logging
 logging.basicConfig(
@@ -392,6 +392,7 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         raw = await asyncio.to_thread(kb.query_strategy, question, 10)
         chunks = [r for r in raw if r.get("metadata", {}).get("chunk_index", 1) != 0][:5]
     except Exception as e:
+        logger.error("ChromaDB query failed in /explain: %s", e)
         await update.message.reply_text(
             f"❌ ChromaDB error: `{_escape_md(type(e).__name__)}`",
             parse_mode="Markdown",
@@ -466,6 +467,7 @@ Answer:"""
         resp.raise_for_status()
         answer = resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
+        logger.error("OpenRouter request failed in /explain: %s", e)
         err = _escape_md(f"{type(e).__name__}: {e}")
         await update.message.reply_text(
             f"❌ OpenRouter error: `{err}`",
@@ -752,6 +754,9 @@ def main() -> None:
     app.add_handler(CommandHandler("note", cmd_note))
     app.add_handler(CommandHandler("lesson", cmd_lesson))
     app.add_handler(CommandHandler("notes", cmd_notes))
+
+    # Unknown commands fallback — must be registered last
+    app.add_handler(MessageHandler(filters.COMMAND, cmd_unknown))
 
     # Global error handler
     app.add_error_handler(error_handler)
