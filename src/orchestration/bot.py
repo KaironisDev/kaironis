@@ -488,98 +488,94 @@ ANTWOORD:"""
 # Reflection Commands — /note, /lesson, /notes
 # ─────────────────────────────────────────────
 
+async def _save_observation_and_reply(
+    update: Update,
+    *,
+    category: str,
+    usage_hint: str,
+    success_prefix: str,
+    success_label: str,
+) -> None:
+    """
+    Gedeelde helper voor /note en /lesson.
+
+    Parseert de berichttekst, slaat de observatie op en stuurt een bevestiging.
+    Bij een falende Markdown-reply wordt een plain-text fallback geprobeerd zodat
+    de operator altijd feedback krijgt dat de opslag geslaagd is.
+    """
+    message_text = update.message.text or ""
+    parts = message_text.split(None, 1)
+
+    if len(parts) < 2 or not parts[1].strip():
+        await update.message.reply_text(usage_hint, parse_mode="Markdown")
+        return
+
+    content = parts[1].strip()
+    reflection = _get_reflection_log()
+
+    if reflection is None:
+        await update.message.reply_text(
+            "⛔ Database niet geconfigureerd (DATABASE\\_URL ontbreekt).",
+            parse_mode="Markdown",
+        )
+        return
+
+    # Sla op en bevestig afzonderlijk zodat DB-fouten en reply-fouten niet worden vermengd
+    try:
+        record_id = await reflection.log_observation(
+            category=category,
+            content=content,
+            metadata={"telegram_user": update.effective_user.id},
+        )
+    except Exception as e:
+        logger.exception("%s opslaan mislukt: %s", success_label, e)
+        await update.message.reply_text(
+            f"⛔ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
+            parse_mode="Markdown",
+        )
+        return
+
+    # Eerste poging: Markdown-reply
+    try:
+        await update.message.reply_text(
+            f"{success_prefix} {success_label} opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
+            parse_mode="Markdown",
+        )
+        return
+    except Exception as e:
+        logger.exception("Markdown reply voor %s (id=%d) mislukt: %s", success_label, record_id, e)
+
+    # Fallback: plain-text reply zodat operator weet dat de opslag geslaagd is
+    try:
+        await update.message.reply_text(
+            f"{success_prefix} {success_label} opgeslagen (id: {record_id})."
+        )
+    except Exception as e:
+        logger.exception("Fallback reply voor %s (id=%d) ook mislukt: %s", success_label, record_id, e)
+
+
 @operator_only
-async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:  # noqa: ARG001
     """Sla een marktobservatie op."""
-    message_text = update.message.text or ""
-    parts = message_text.split(None, 1)
-
-    if len(parts) < 2 or not parts[1].strip():
-        await update.message.reply_text(
-            "📝 Gebruik: `/note [tekst]`\n\nVoorbeeld: `/note DXY loopt in supply zone op H4`",
-            parse_mode="Markdown",
-        )
-        return
-
-    content = parts[1].strip()
-    reflection = _get_reflection_log()
-
-    if reflection is None:
-        await update.message.reply_text(
-            "❌ Database niet geconfigureerd (DATABASE\\_URL ontbreekt).",
-            parse_mode="Markdown",
-        )
-        return
-
-    # Sla op en bevestig afzonderlijk zodat DB-fouten en reply-fouten niet worden vermengd
-    try:
-        record_id = await reflection.log_observation(
-            category="market_observation",
-            content=content,
-            metadata={"telegram_user": update.effective_user.id},
-        )
-    except Exception as e:
-        logger.error("Note opslaan mislukt: %s", e)
-        await update.message.reply_text(
-            f"❌ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
-            parse_mode="Markdown",
-        )
-        return
-
-    try:
-        await update.message.reply_text(
-            f"✅ Observatie opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        logger.error("Reply sturen voor note (id=%d) mislukt: %s", record_id, e)
+    await _save_observation_and_reply(
+        update,
+        category="market_observation",
+        usage_hint="📝 Gebruik: `/note [tekst]`\n\nVoorbeeld: `/note DXY loopt in supply zone op H4`",
+        success_prefix="✅",
+        success_label="Observatie",
+    )
 
 
 @operator_only
-async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:  # noqa: ARG001
     """Sla een les op als 'lesson_learned'."""
-    message_text = update.message.text or ""
-    parts = message_text.split(None, 1)
-
-    if len(parts) < 2 or not parts[1].strip():
-        await update.message.reply_text(
-            "🎓 Gebruik: `/lesson [tekst]`\n\nVoorbeeld: `/lesson Nooit traden in eerste 5 min na NY open`",
-            parse_mode="Markdown",
-        )
-        return
-
-    content = parts[1].strip()
-    reflection = _get_reflection_log()
-
-    if reflection is None:
-        await update.message.reply_text(
-            "❌ Database niet geconfigureerd (DATABASE\\_URL ontbreekt).",
-            parse_mode="Markdown",
-        )
-        return
-
-    # Sla op en bevestig afzonderlijk zodat DB-fouten en reply-fouten niet worden vermengd
-    try:
-        record_id = await reflection.log_observation(
-            category="lesson_learned",
-            content=content,
-            metadata={"telegram_user": update.effective_user.id},
-        )
-    except Exception as e:
-        logger.error("Lesson opslaan mislukt: %s", e)
-        await update.message.reply_text(
-            f"❌ Fout bij opslaan: `{_escape_md(type(e).__name__)}`",
-            parse_mode="Markdown",
-        )
-        return
-
-    try:
-        await update.message.reply_text(
-            f"🎓 Lesson learned opgeslagen (id: {record_id})\n\n_{_escape_md(content)}_",
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        logger.error("Reply sturen voor lesson (id=%d) mislukt: %s", record_id, e)
+    await _save_observation_and_reply(
+        update,
+        category="lesson_learned",
+        usage_hint="🎓 Gebruik: `/lesson [tekst]`\n\nVoorbeeld: `/lesson Nooit traden in eerste 5 min na NY open`",
+        success_prefix="🎓",
+        success_label="Lesson learned",
+    )
 
 
 @operator_only

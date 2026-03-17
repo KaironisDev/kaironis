@@ -43,6 +43,10 @@ CREATE_TABLE_STATEMENTS = (
     """,
     "CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category)",
     "CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC)",
+    # pg_trgm extension + GIN trigram indexes voor efficiënte ILIKE '%...%' zoekopdrachten
+    "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+    "CREATE INDEX IF NOT EXISTS reflections_content_trgm_idx ON reflections USING GIN (content gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS reflections_category_trgm_idx ON reflections USING GIN (category gin_trgm_ops)",
 )
 
 # Maximum aantal records dat get_recent() mag teruggeven
@@ -234,6 +238,8 @@ class ReflectionLog:
         Returns:
             Lijst van matching dicts, gesorteerd op datum (meest recent eerst).
         """
+        if not isinstance(query, str):
+            raise TypeError(f"query must be a string, got {type(query).__name__!r}")
         query = query.strip()
         if not query:
             return []
