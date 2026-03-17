@@ -10,6 +10,16 @@ Example::
     await log.log_observation("lesson_learned", "Nooit traden in eerste 5 min na NY open")
     recent = await log.get_recent(limit=5)
     hits = await log.search("NY open")
+
+Note:
+    De GIN trigram indexes (reflections_content_trgm_idx, reflections_category_trgm_idx)
+    vereisen de pg_trgm PostgreSQL-extensie. Deze extensie moet door een database-administrator
+    (superuser) vooraf aangemaakt worden::
+
+        docker exec kaironis-postgres psql -U postgres -d kaironis -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
+    Als de extensie niet beschikbaar is, worden de trigram indexes overgeslagen.
+    ILIKE-zoekopdrachten blijven functioneel, maar zonder de performance-optimalisatie van GIN indexes.
 """
 
 import asyncio
@@ -31,6 +41,7 @@ VALID_CATEGORIES = frozenset([
 ])
 
 # DDL statements als expliciete tuple — vermijdt fragiel split(";") op embedded puntkomma's
+# Basisstructuur (geen superuser vereist)
 CREATE_TABLE_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS reflections (
@@ -43,8 +54,11 @@ CREATE_TABLE_STATEMENTS = (
     """,
     "CREATE INDEX IF NOT EXISTS reflections_category_idx ON reflections(category)",
     "CREATE INDEX IF NOT EXISTS reflections_created_idx ON reflections(created_at DESC)",
-    # pg_trgm extension + GIN trigram indexes voor efficiënte ILIKE '%...%' zoekopdrachten
-    "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+)
+
+# GIN trigram indexes — vereisen pg_trgm extensie (superuser-rechten).
+# Worden alleen aangemaakt als de extensie beschikbaar is.
+TRGM_INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS reflections_content_trgm_idx ON reflections USING GIN (content gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS reflections_category_trgm_idx ON reflections USING GIN (category gin_trgm_ops)",
 )
@@ -86,13 +100,42 @@ class ReflectionLog:
         return self._pool
 
     async def initialize(self) -> None:
-        """Maak de tabel en indices aan als ze nog niet bestaan."""
+        """
+        Maak de tabel en indices aan als ze nog niet bestaan.
+
+        Basis DDL (tabel + standaard indexes) wordt in één transactie uitgevoerd.
+        GIN trigram indexes worden daarna geprobeerd; als pg_trgm niet beschikbaar
+        is, wordt een waarschuwing gelogd en de rest van de startup gaat door.
+
+        Tip: pre-create pg_trgm in productie::
+
+            docker exec kaironis-postgres psql -U postgres -d kaironis \\
+                -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+        """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            for statement in CREATE_TABLE_STATEMENTS:
+            # Basisstructuur atomisch in één transactie
+            async with conn.transaction():
+                for statement in CREATE_TABLE_STATEMENTS:
+                    stmt = statement.strip()
+                    if stmt:
+                        await conn.execute(stmt)
+
+            # Trigram indexes optioneel — vereisen pg_trgm extensie
+            for statement in TRGM_INDEX_STATEMENTS:
                 stmt = statement.strip()
                 if stmt:
-                    await conn.execute(stmt)
+                    try:
+                        await conn.execute(stmt)
+                    except asyncpg.UndefinedObjectError:
+                        logger.warning(
+                            "pg_trgm extensie niet beschikbaar — trigram index overgeslagen. "
+                            "Pre-create de extensie voor betere ILIKE performance: "
+                            "docker exec kaironis-postgres psql -U postgres -d kaironis "
+                            "-c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\""
+                        )
+                        break  # Beide indexes vereisen pg_trgm; één warning is genoeg
+
         logger.info("ReflectionLog tabel geïnitialiseerd")
 
     async def close(self) -> None:
@@ -240,18 +283,32 @@ class ReflectionLog:
 
         return [_row_to_dict(row) for row in rows]
 
-    async def search(self, query: str) -> list[dict[str, Any]]:
+    async def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """
         Full-text zoeken in PostgreSQL via ILIKE (portable, geen tsvector setup nodig).
 
         Args:
             query: Zoekterm(en).
+            limit: Maximum aantal resultaten (default: 20). Must be >= 1 and <= MAX_LIMIT.
 
         Returns:
             Lijst van matching dicts, gesorteerd op datum (meest recent eerst).
+
+        Raises:
+            TypeError: Als query geen string is of limit geen integer.
+            ValueError: Als limit buiten het bereik [1, MAX_LIMIT] valt.
         """
         if not isinstance(query, str):
             raise TypeError(f"query must be a string, got {type(query).__name__!r}")
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise TypeError(
+                f"limit must be an integer >= 1, got {type(limit).__name__}"
+            )
+        if limit < 1:
+            raise ValueError(f"limit must be >= 1, got {limit}")
+        if limit > MAX_LIMIT:
+            raise ValueError(f"limit must be <= {MAX_LIMIT}, got {limit}")
+
         query = query.strip()
         if not query:
             return []
@@ -267,9 +324,10 @@ class ReflectionLog:
                 FROM reflections
                 WHERE content ILIKE $1 ESCAPE '\\' OR category ILIKE $1 ESCAPE '\\'
                 ORDER BY created_at DESC
-                LIMIT 20
+                LIMIT $2
                 """,
                 pattern,
+                limit,
             )
 
         # Log geanonimiseerde query (eerste 4 tekens + "...") om reflection-data niet te lekken

@@ -5,12 +5,12 @@ Alle DB interacties worden gemockt via unittest.mock.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
-from src.memory.reflection import ReflectionLog, VALID_CATEGORIES, _row_to_dict
+from src.memory.reflection import ReflectionLog, VALID_CATEGORIES, MAX_LIMIT, _row_to_dict
 
 
 # ─────────────────────────────────────────────
@@ -44,7 +44,7 @@ def make_mock_pool(rows=None, fetchrow_result=None):
 
 
 def make_mock_row(
-    id=1,
+    row_id=1,
     category="lesson_learned",
     content="Test content",
     metadata=None,
@@ -52,12 +52,12 @@ def make_mock_row(
 ):
     """Maak een nep asyncpg Record."""
     row = MagicMock()
-    row.__getitem__ = lambda self, key: {
-        "id": id,
+    row.__getitem__ = lambda _, key: {
+        "id": row_id,
         "category": category,
         "content": content,
         "metadata": json.dumps(metadata) if metadata is not None else None,
-        "created_at": created_at or datetime(2026, 3, 15, 12, 0, 0),
+        "created_at": created_at or datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc),
     }[key]
     return row
 
@@ -152,8 +152,8 @@ class TestGetRecent:
     @pytest.mark.asyncio
     async def test_returns_list_of_dicts(self):
         rows = [
-            make_mock_row(id=1, category="lesson_learned", content="Les 1"),
-            make_mock_row(id=2, category="market_observation", content="Obs 2"),
+            make_mock_row(row_id=1, category="lesson_learned", content="Les 1"),
+            make_mock_row(row_id=2, category="market_observation", content="Obs 2"),
         ]
         mock_pool, _ = make_mock_pool(rows=rows)
         log = ReflectionLog(pool=mock_pool)
@@ -213,9 +213,16 @@ class TestGetRecent:
             await log.get_recent(limit=0)
 
     @pytest.mark.asyncio
+    async def test_limit_exceeds_max_raises_valueerror(self):
+        mock_pool, _ = make_mock_pool()
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(ValueError, match=f"limit must be <= {MAX_LIMIT}"):
+            await log.get_recent(limit=MAX_LIMIT + 1)
+
+    @pytest.mark.asyncio
     async def test_datetime_converted_to_isoformat(self):
         dt = datetime(2026, 3, 15, 9, 30, 0)
-        rows = [make_mock_row(id=1, content="test", created_at=dt)]
+        rows = [make_mock_row(row_id=1, content="test", created_at=dt)]
         mock_pool, _ = make_mock_pool(rows=rows)
         log = ReflectionLog(pool=mock_pool)
         result = await log.get_recent()
@@ -244,7 +251,7 @@ class TestSearch:
     @pytest.mark.asyncio
     async def test_returns_matching_rows(self):
         rows = [
-            make_mock_row(id=1, content="PO3 uitleg in lectuur"),
+            make_mock_row(row_id=1, content="PO3 uitleg in lectuur"),
         ]
         mock_pool, _ = make_mock_pool(rows=rows)
         log = ReflectionLog(pool=mock_pool)
@@ -289,13 +296,46 @@ class TestSearch:
 
 class TestInitialize:
     @pytest.mark.asyncio
-    async def test_execute_called_for_all_statements(self):
-        from src.memory.reflection import CREATE_TABLE_STATEMENTS
+    async def test_execute_called_for_base_statements(self):
+        """Basisstructuur wordt aangemaakt; trigram indexes worden ook geprobeerd."""
+        from src.memory.reflection import CREATE_TABLE_STATEMENTS, TRGM_INDEX_STATEMENTS
         mock_pool, mock_conn = make_mock_pool()
+        # Simuleer transactie context manager
+        mock_transaction = MagicMock()
+        mock_transaction.__aenter__ = AsyncMock(return_value=None)
+        mock_transaction.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
         log = ReflectionLog(pool=mock_pool)
         await log.initialize()
-        # One execute() call per statement in CREATE_TABLE_STATEMENTS
-        assert mock_conn.execute.call_count == len(CREATE_TABLE_STATEMENTS)
+        # Alle base statements + alle trgm statements worden geprobeerd
+        expected_count = len(CREATE_TABLE_STATEMENTS) + len(TRGM_INDEX_STATEMENTS)
+        assert mock_conn.execute.call_count == expected_count
+
+    @pytest.mark.asyncio
+    async def test_initialize_skips_trgm_on_extension_missing(self):
+        """Als pg_trgm niet beschikbaar is, wordt de trigram index overgeslagen zonder crash."""
+        import asyncpg
+        from src.memory.reflection import CREATE_TABLE_STATEMENTS
+        mock_pool, mock_conn = make_mock_pool()
+        mock_transaction = MagicMock()
+        mock_transaction.__aenter__ = AsyncMock(return_value=None)
+        mock_transaction.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+
+        # Eerste N calls (basisstructuur) slagen; daarna UndefinedObjectError voor trgm
+        base_calls = len(CREATE_TABLE_STATEMENTS)
+        call_count = 0
+
+        async def execute_side_effect(stmt):
+            nonlocal call_count
+            call_count += 1
+            if call_count > base_calls:
+                raise asyncpg.UndefinedObjectError("type gin_trgm_ops does not exist")
+
+        mock_conn.execute = AsyncMock(side_effect=execute_side_effect)
+        log = ReflectionLog(pool=mock_pool)
+        # Mag niet crashen
+        await log.initialize()
 
 
 # ─────────────────────────────────────────────
@@ -336,7 +376,7 @@ class TestLifecycle:
 
 class TestRowToDict:
     def test_basic_conversion(self):
-        row = make_mock_row(id=1, category="trade_setup", content="Test", metadata={"k": "v"})
+        row = make_mock_row(row_id=1, category="trade_setup", content="Test", metadata={"k": "v"})
         result = _row_to_dict(row)
         assert result["id"] == 1
         assert result["category"] == "trade_setup"
@@ -344,7 +384,7 @@ class TestRowToDict:
         assert result["metadata"] == {"k": "v"}
 
     def test_none_metadata_stays_none(self):
-        row = make_mock_row(id=1, metadata=None)
+        row = make_mock_row(row_id=1, metadata=None)
         result = _row_to_dict(row)
         assert result["metadata"] is None
 
@@ -361,12 +401,18 @@ class TestRowToDict:
 
     def test_invalid_json_metadata_returns_empty_dict(self):
         row = MagicMock()
-        row.__getitem__ = lambda self, key: {
+        row.__getitem__ = lambda _, key: {
             "id": 1,
             "category": "lesson_learned",
             "content": "test",
             "metadata": "not-valid-json{{{",
-            "created_at": datetime(2026, 1, 1),
+            "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
         }[key]
+        result = _row_to_dict(row)
+        assert result["metadata"] == {}
+
+    def test_empty_dict_metadata_stays_empty_dict(self):
+        """Lege dict metadata mag niet naar None worden geconverteerd."""
+        row = make_mock_row(row_id=1, metadata={})
         result = _row_to_dict(row)
         assert result["metadata"] == {}
