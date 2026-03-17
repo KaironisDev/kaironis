@@ -88,14 +88,14 @@ class TestLogObservation:
     async def test_invalid_category_raises(self):
         mock_pool, _ = make_mock_pool()
         log = ReflectionLog(pool=mock_pool)
-        with pytest.raises(ValueError, match="Ongeldige categorie"):
+        with pytest.raises(ValueError, match="Invalid category"):
             await log.log_observation("invalid_cat", "Some content")
 
     @pytest.mark.asyncio
     async def test_empty_content_raises(self):
         mock_pool, _ = make_mock_pool()
         log = ReflectionLog(pool=mock_pool)
-        with pytest.raises(ValueError, match="Content mag niet leeg zijn"):
+        with pytest.raises(ValueError, match="Content must not be empty"):
             await log.log_observation("lesson_learned", "   ")
 
     @pytest.mark.asyncio
@@ -345,8 +345,8 @@ class TestSearch:
         await log.search("PO3_50%")
 
         args = mock_conn.fetch.call_args[0]
-        # SQL moet ESCAPE '\\' bevatten
-        assert "ESCAPE" in args[0]
+        # SQL moet expliciet backslash als escape gebruiken
+        assert "ESCAPE '\\'" in args[0]
         # Pattern arg: % en _ zijn geëscaped
         assert args[1] == r"%PO3\_50\%%"
 
@@ -449,7 +449,7 @@ class TestLifecycle:
     @pytest.mark.asyncio
     async def test_no_dsn_and_no_pool_raises_on_query(self):
         log = ReflectionLog()  # geen dsn, geen pool
-        with pytest.raises(ValueError, match="Geen DSN opgegeven"):
+        with pytest.raises(ValueError, match="No DSN provided"):
             await log.get_recent()
 
 
@@ -472,10 +472,10 @@ class TestRowToDict:
         assert result["metadata"] is None
 
     def test_datetime_converted(self):
-        dt = datetime(2026, 1, 1, 0, 0, 0)
+        dt = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         row = make_mock_row(created_at=dt)
         result = _row_to_dict(row)
-        assert result["created_at"] == "2026-01-01T00:00:00"
+        assert result["created_at"] == "2026-01-01T00:00:00+00:00"
 
     def test_string_metadata_parsed(self):
         row = make_mock_row(metadata={"key": "val"})
