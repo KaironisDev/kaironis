@@ -175,6 +175,28 @@ class TestGetRecent:
         assert 7 in call_args
 
     @pytest.mark.asyncio
+    async def test_invalid_limit_type_raises_typeerror(self):
+        mock_pool, _ = make_mock_pool()
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(TypeError, match="limit must be an integer"):
+            await log.get_recent(limit=1.5)
+
+    @pytest.mark.asyncio
+    async def test_bool_limit_raises_typeerror(self):
+        """bool is a subclass of int, so True/False must be explicitly rejected."""
+        mock_pool, _ = make_mock_pool()
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(TypeError, match="limit must be an integer"):
+            await log.get_recent(limit=True)
+
+    @pytest.mark.asyncio
+    async def test_negative_limit_raises_valueerror(self):
+        mock_pool, _ = make_mock_pool()
+        log = ReflectionLog(pool=mock_pool)
+        with pytest.raises(ValueError, match="limit must be >= 1"):
+            await log.get_recent(limit=0)
+
+    @pytest.mark.asyncio
     async def test_datetime_converted_to_isoformat(self):
         dt = datetime(2026, 3, 15, 9, 30, 0)
         rows = [make_mock_row(id=1, content="test", created_at=dt)]
@@ -238,12 +260,13 @@ class TestSearch:
 
 class TestInitialize:
     @pytest.mark.asyncio
-    async def test_execute_called_three_times(self):
+    async def test_execute_called_for_all_statements(self):
+        from src.memory.reflection import CREATE_TABLE_STATEMENTS
         mock_pool, mock_conn = make_mock_pool()
         log = ReflectionLog(pool=mock_pool)
         await log.initialize()
-        # CREATE TABLE + 2x CREATE INDEX = 3 execute calls
-        assert mock_conn.execute.call_count == 3
+        # One execute() call per statement in CREATE_TABLE_STATEMENTS
+        assert mock_conn.execute.call_count == len(CREATE_TABLE_STATEMENTS)
 
 
 # ─────────────────────────────────────────────
@@ -252,9 +275,21 @@ class TestInitialize:
 
 class TestLifecycle:
     @pytest.mark.asyncio
-    async def test_close_closes_pool(self):
+    async def test_close_does_not_close_injected_pool(self):
+        """An injected pool is externally owned; close() must leave it intact."""
         mock_pool, _ = make_mock_pool()
         log = ReflectionLog(pool=mock_pool)
+        assert log._owns_pool is False, "Injected pool must not be owned"
+        await log.close()
+        mock_pool.close.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_close_closes_self_created_pool(self):
+        """A pool created by ReflectionLog itself must be closed on close()."""
+        mock_pool, _ = make_mock_pool()
+        log = ReflectionLog(dsn="postgresql://localhost/kaironis")
+        log._pool = mock_pool  # inject to simulate a created pool
+        log._owns_pool = True
         await log.close()
         mock_pool.close.assert_awaited_once()
         assert log._pool is None

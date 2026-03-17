@@ -191,7 +191,7 @@ class ReflectionLog:
         """
         if not isinstance(limit, int) or isinstance(limit, bool):
             raise TypeError(
-                f"limit must be an integer >= 1, got {type(limit).__name__!r}"
+                f"limit must be an integer >= 1, got {type(limit).__name__}"
             )
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
