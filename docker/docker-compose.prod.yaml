@@ -51,8 +51,10 @@ services:
       - REDIS_PORT=6379
       - CHROMADB_HOST=chromadb
       - CHROMADB_PORT=8000
-      - OLLAMA_HOST=ollama
+      - OLLAMA_HOST=localhost
       - OLLAMA_PORT=11434
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-001}
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
     healthcheck:
