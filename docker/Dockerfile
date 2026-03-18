@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Systeem dependencies
+# System dependencies
+# - gcc: required for compiling some Python packages
+# - poppler-utils: required by pdf2image for PDF → image conversion (ingest_images.py)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies
@@ -20,5 +23,9 @@ RUN mkdir -p /app/logs
 # Non-root user voor security
 RUN useradd -m -u 1000 kaironis && chown -R kaironis:kaironis /app
 USER kaironis
+
+# Health check — verifies the bot process is alive
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD pgrep -f "src.orchestration.bot" || exit 1
 
 CMD ["python", "-m", "src.orchestration.bot"]

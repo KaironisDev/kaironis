@@ -223,6 +223,10 @@ class KnowledgeBase:
         if not question or not question.strip():
             raise ValueError("Search query must not be empty")
 
+        # Expand known TCT abbreviations so embeddings match richer content.
+        # Acronyms embed poorly in isolation; expanding them improves recall.
+        question = _expand_tct_query(question)
+
         query_embedding = self.embedder.get_embedding(question)
 
         where: Optional[Dict[str, Any]] = None
@@ -322,6 +326,55 @@ class KnowledgeBase:
             "chromadb_port": self.chroma.port,
             "ollama_model": self.embedder.model,
         }
+
+
+# TCT abbreviation expansion map — acronyms embed poorly in isolation.
+# Expanding them to their full form improves semantic search recall.
+_TCT_ABBREVIATIONS: Dict[str, str] = {
+    "BOS": "Break of Structure",
+    "PO3": "Power of Three accumulation distribution manipulation",
+    "S/D": "supply and demand zone",
+    "SD": "supply and demand zone",
+    "SL": "stop loss",
+    "TP": "take profit",
+    "HL": "higher low",
+    "HH": "higher high",
+    "LL": "lower low",
+    "LH": "lower high",
+    "NY": "New York session open",
+    "LDN": "London session open",
+    "MSB": "market structure break",
+    "FVG": "fair value gap imbalance",
+    "OB": "order block",
+    "CHOCH": "change of character market structure shift",
+    "PDH": "previous day high",
+    "PDL": "previous day low",
+    "EQH": "equal highs liquidity",
+    "EQL": "equal lows liquidity",
+}
+
+
+def _expand_tct_query(query: str) -> str:
+    """
+    Expand TCT abbreviations in a query to improve embedding recall.
+
+    Adds the full-form term alongside the abbreviation so the resulting
+    embedding captures both the short and the long form.
+
+    Example:
+        "BOS" -> "BOS Break of Structure"
+        "wat is BOS?" -> "wat is BOS Break of Structure?"
+    """
+    import re
+    expanded = query
+    for abbr, full in _TCT_ABBREVIATIONS.items():
+        # Case-insensitive whole-word match so "bos", "BOS", "Bos" all expand.
+        pattern = rf'\b{re.escape(abbr)}\b'
+        if re.search(pattern, expanded, re.IGNORECASE) and full.lower() not in expanded.lower():
+            expanded = re.sub(pattern, f"{abbr} {full}", expanded, flags=re.IGNORECASE)
+    if expanded != query:
+        logger.debug("Query expanded: %r -> %r", query, expanded)
+    return expanded
 
 
 def _detect_category(rel_path: str) -> str:
