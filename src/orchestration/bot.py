@@ -497,7 +497,7 @@ async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     context_text = "\n\n".join(context_parts)
 
-    prompt = f"""You are Kaironis, an AI trading assistant specializing in the TCT (Time-Cycle Trading) strategy.
+    prompt = f"""You are Kaironis, an AI trading assistant specializing in the TCT (The Composite Trader) strategy.
 Answer the following question based on the provided TCT documentation. Be concrete and practical.
 Answer in English. Maximum 400 words.
 
