@@ -2,17 +2,22 @@
 Kaironis Telegram Bot — Operator Interface
 
 Commands:
-    /start      - Welcome message
-    /help       - Command overview
-    /status     - Current agent status + ChromaDB status
-    /pause      - Pause autonomous trading
-    /resume     - Resume autonomous trading
-    /emergency  - KILL SWITCH — stop everything immediately
-    /ask        - Query the TCT strategy knowledge base (raw chunks)
-    /explain    - RAG: ask a question, get a summary via AI
-    /note       - Save a market observation
-    /lesson     - Save a lesson learned
-    /notes      - Show the last 5 notes
+    /start      - Welcome message (content depends on access level)
+    /myid       - Show your Telegram ID (public, no auth required)
+    /help       - Command overview (operator only)
+    /status     - Current agent status + ChromaDB status (operator only)
+    /pause      - Pause autonomous trading (operator only)
+    /resume     - Resume autonomous trading (operator only)
+    /emergency  - KILL SWITCH — stop everything immediately (operator only)
+    /ask        - Query the TCT strategy knowledge base (operator + allowlist)
+    /explain    - RAG: ask a question, get a summary via AI (operator + allowlist)
+    /note       - Save a market observation (operator only)
+    /lesson     - Save a lesson learned (operator only)
+    /notes      - Show the last 5 notes (operator only)
+
+Access control:
+    TELEGRAM_OPERATOR_CHAT_ID  - Full access (operator)
+    TELEGRAM_ALLOWED_USERS     - Comma-separated IDs with /ask + /explain access
 
 Architecture:
     - Async via python-telegram-bot v21
@@ -57,6 +62,15 @@ except ValueError:
     sys.exit(
         f"Error: TELEGRAM_OPERATOR_CHAT_ID must be an integer, got: {_raw_operator_id!r}"
     )
+
+# Allowlist: comma-separated Telegram user IDs that may use /explain and /ask
+# e.g. TELEGRAM_ALLOWED_USERS=123456789,987654321,555555555
+_raw_allowed = os.getenv("TELEGRAM_ALLOWED_USERS", "")
+ALLOWED_USER_IDS: set[int] = set()
+for _uid in _raw_allowed.split(","):
+    _uid = _uid.strip()
+    if _uid.isdigit():
+        ALLOWED_USER_IDS.add(int(_uid))
 
 # Ollama config (strip http:// prefix if present)
 _ollama_raw = os.getenv("OLLAMA_HOST", "localhost")
@@ -141,19 +155,79 @@ def operator_only(func):
     return wrapper
 
 
+def allowed_user(func):
+    """Decorator: allow operator + users on the TELEGRAM_ALLOWED_USERS allowlist."""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        if uid != OPERATOR_CHAT_ID and uid not in ALLOWED_USER_IDS:
+            logger.warning("Unauthorized access from user %s", uid)
+            await update.message.reply_text(
+                "⛔ Not authorized.\n\n"
+                "Use /myid to get your Telegram ID and share it with the operator."
+            )
+            return
+        return await func(update, context)
+    return wrapper
+
+
 # ─────────────────────────────────────────────────────────────────
 # Command Handlers
 # ─────────────────────────────────────────────────────────────────
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Welcome message on first contact."""
+async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Return the user's Telegram ID — public, no auth required."""
+    uid = update.effective_user.id
+    name = update.effective_user.first_name or "there"
     await update.message.reply_text(
-        "⚡ *Kaironis online.*\n\n"
-        "I am your autonomous trading partner.\n"
-        "Use /help for a command overview.\n\n"
-        "_The opportune moment awaits._",
+        f"👤 *Your Telegram ID*\n\n`{uid}`\n\n"
+        f"Hi {name}! Share this ID with the operator to get access to Kaironis.",
         parse_mode="Markdown",
     )
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Welcome message — shows available commands based on access level."""
+    uid = update.effective_user.id
+    is_operator = uid == OPERATOR_CHAT_ID
+    is_allowed = uid in ALLOWED_USER_IDS
+
+    if is_operator:
+        await update.message.reply_text(
+            "⚡ *Kaironis online.*\n\n"
+            "Welcome back, operator.\n\n"
+            "*Available commands:*\n"
+            "/explain \\[vraag\\] — RAG antwoord op TCT vraag\n"
+            "/ask \\[vraag\\] — Ruwe chunks uit kennisbank\n"
+            "/status — Agent \\+ ChromaDB status\n"
+            "/pause — Pauzeer trading\n"
+            "/resume — Hervat trading\n"
+            "/note \\[tekst\\] — Sla observatie op\n"
+            "/lesson \\[tekst\\] — Sla les op\n"
+            "/notes — Laatste 5 notities\n"
+            "/emergency — ⛔ KILL SWITCH\n"
+            "/help — Volledig overzicht\n\n"
+            "_The opportune moment awaits._",
+            parse_mode="Markdown",
+        )
+    elif is_allowed:
+        await update.message.reply_text(
+            "⚡ *Kaironis — TCT Knowledge Base*\n\n"
+            "Je hebt toegang tot de TCT strategie kennisbank.\n\n"
+            "*Beschikbare commands:*\n"
+            "/explain \\[vraag\\] — Gedetailleerd antwoord op TCT vraag\n"
+            "/ask \\[vraag\\] — Ruwe chunks uit de strategie docs\n"
+            "/myid — Jouw Telegram ID\n\n"
+            "_Vraag alles over Time\\-Cycle Trading._",
+            parse_mode="Markdown",
+        )
+    else:
+        await update.message.reply_text(
+            "⚡ *Kaironis*\n\n"
+            "Je hebt momenteel geen toegang.\n\n"
+            "Gebruik /myid om je Telegram ID op te vragen en deel dit met de operator.",
+            parse_mode="Markdown",
+        )
 
 
 @operator_only
@@ -281,7 +355,7 @@ async def cmd_emergency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # Knowledge base — /ask
 # ─────────────────────────────────────────────────────────────────
 
-@operator_only
+@allowed_user
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Query the TCT strategy knowledge base via ChromaDB."""
     message_text = update.message.text or ""
@@ -371,7 +445,7 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
 
-@operator_only
+@allowed_user
 async def cmd_explain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """RAG: ask a question, get an AI summary based on TCT docs."""
     message_text = update.message.text or ""
@@ -740,6 +814,7 @@ def main() -> None:
 
     # Register commands
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("pause", cmd_pause))
