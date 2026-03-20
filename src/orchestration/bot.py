@@ -27,6 +27,7 @@ Architecture:
 """
 
 import asyncio
+import json
 import logging
 import os
 import requests
@@ -754,11 +755,11 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def handle_trainer_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handles free-text messages from trainer IDs (e.g. Lars).
-    Stages the message as a pending knowledge update in PostgreSQL.
-    Operator receives a Telegram notification to review and approve/reject.
+    If the message is a reply to a bot message, captures the bot answer
+    as context so the operator can see exactly what Lars is correcting.
 
     Approval flow:
-        Trainer sends message → staged in DB → operator notified
+        Trainer sends/replies → staged in DB → operator notified with context
         → operator uses /approve <id> or /reject <id> to action it
     """
     uid = update.effective_user.id
@@ -772,6 +773,14 @@ async def handle_trainer_message(update: Update, context: ContextTypes.DEFAULT_T
     trainer_name = update.effective_user.first_name or f"Trainer {uid}"
     logger.info("Trainer message received from %s (%s): %s", trainer_name, uid, text[:100])
 
+    # Check if this is a reply to a bot message — capture context
+    reply_context = None
+    replied_msg = update.message.reply_to_message
+    if replied_msg and replied_msg.from_user and replied_msg.from_user.is_bot:
+        bot_text = replied_msg.text or ""
+        reply_context = {"bot_answer": bot_text[:1000]}
+        logger.info("Trainer is replying to bot message: %s", bot_text[:100])
+
     # Stage in PostgreSQL if available
     staged_id = None
     if DATABASE_URL:
@@ -784,16 +793,21 @@ async def handle_trainer_message(update: Update, context: ContextTypes.DEFAULT_T
                         trainer_id BIGINT NOT NULL,
                         trainer_name TEXT,
                         content TEXT NOT NULL,
+                        reply_context JSONB,
                         status VARCHAR(20) NOT NULL DEFAULT 'pending',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         reviewed_at TIMESTAMPTZ,
                         reviewed_by BIGINT
                     )
                 """)
+                await conn.execute("""
+                    ALTER TABLE staged_knowledge ADD COLUMN IF NOT EXISTS reply_context JSONB
+                """)
                 staged_id = await conn.fetchval("""
-                    INSERT INTO staged_knowledge (trainer_id, trainer_name, content)
-                    VALUES ($1, $2, $3) RETURNING id
-                """, uid, trainer_name, text)
+                    INSERT INTO staged_knowledge (trainer_id, trainer_name, content, reply_context)
+                    VALUES ($1, $2, $3, $4) RETURNING id
+                """, uid, trainer_name, text,
+                    json.dumps(reply_context) if reply_context else None)
             finally:
                 await conn.close()
         except Exception as e:
@@ -804,18 +818,27 @@ async def handle_trainer_message(update: Update, context: ContextTypes.DEFAULT_T
         f"✅ Thanks {trainer_name}! Your update has been received and is pending review.",
     )
 
-    # Notify operator
+    # Build operator notification with optional reply context
     preview = text[:300] + ("…" if len(text) > 300 else "")
-    id_str = f" (ID: `{staged_id}`)" if staged_id else ""
+    id_label = f" \\(ID: `{staged_id}`\\)" if staged_id else ""
+    notification_parts = [
+        f"📥 *New knowledge update from {_escape_md(trainer_name)}*{id_label}",
+    ]
+    if reply_context and reply_context.get("bot_answer"):
+        bot_preview = reply_context["bot_answer"][:300] + ("…" if len(reply_context["bot_answer"]) > 300 else "")
+        notification_parts.append(f"\n*Bot answered:*\n_{_escape_md(bot_preview)}_")
+        notification_parts.append(f"\n*Lars corrects/adds:*\n_{_escape_md(preview)}_")
+    else:
+        notification_parts.append(f"\n_{_escape_md(preview)}_")
+    notification_parts.append(
+        f"\n`/approve {staged_id}` — add to ChromaDB\n"
+        f"`/reject {staged_id}` — discard"
+    )
+
     try:
         await context.bot.send_message(
             chat_id=OPERATOR_CHAT_ID,
-            text=(
-                f"📥 *New knowledge update from {_escape_md(trainer_name)}*{_escape_md(id_str) if staged_id else ''}\n\n"
-                f"_{_escape_md(preview)}_\n\n"
-                f"Use `/approve {staged_id}` to add to ChromaDB\n"
-                f"Use `/reject {staged_id}` to discard"
-            ),
+            text="\n".join(notification_parts),
             parse_mode="Markdown",
         )
     except Exception as e:
