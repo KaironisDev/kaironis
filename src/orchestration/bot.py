@@ -72,6 +72,16 @@ for _uid in _raw_allowed.split(","):
     if _uid.isdigit():
         ALLOWED_USER_IDS.add(int(_uid))
 
+# Master trainer IDs: their free-text messages are treated as knowledge updates
+# and staged for operator review before entering ChromaDB.
+# e.g. TELEGRAM_TRAINER_IDS=7131738270
+_raw_trainers = os.getenv("TELEGRAM_TRAINER_IDS", "")
+TRAINER_IDS: set[int] = set()
+for _uid in _raw_trainers.split(","):
+    _uid = _uid.strip()
+    if _uid.isdigit():
+        TRAINER_IDS.add(int(_uid))
+
 # Ollama config (strip http:// prefix if present)
 _ollama_raw = os.getenv("OLLAMA_HOST", "localhost")
 OLLAMA_HOST = _ollama_raw.replace("http://", "").replace("https://", "").split(":")[0]
@@ -738,6 +748,179 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 # ─────────────────────────────────────────────────────────────────
+# Trainer free-text handler — stages knowledge updates for review
+# ─────────────────────────────────────────────────────────────────
+
+async def handle_trainer_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles free-text messages from trainer IDs (e.g. Lars).
+    Stages the message as a pending knowledge update in PostgreSQL.
+    Operator receives a Telegram notification to review and approve/reject.
+
+    Approval flow:
+        Trainer sends message → staged in DB → operator notified
+        → operator uses /approve <id> or /reject <id> to action it
+    """
+    uid = update.effective_user.id
+    if uid not in TRAINER_IDS:
+        return  # Not a trainer — ignore
+
+    text = update.message.text or ""
+    if not text.strip():
+        return
+
+    trainer_name = update.effective_user.first_name or f"Trainer {uid}"
+    logger.info("Trainer message received from %s (%s): %s", trainer_name, uid, text[:100])
+
+    # Stage in PostgreSQL if available
+    staged_id = None
+    if DATABASE_URL:
+        try:
+            conn = await asyncpg.connect(DATABASE_URL)
+            try:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS staged_knowledge (
+                        id SERIAL PRIMARY KEY,
+                        trainer_id BIGINT NOT NULL,
+                        trainer_name TEXT,
+                        content TEXT NOT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        reviewed_at TIMESTAMPTZ,
+                        reviewed_by BIGINT
+                    )
+                """)
+                staged_id = await conn.fetchval("""
+                    INSERT INTO staged_knowledge (trainer_id, trainer_name, content)
+                    VALUES ($1, $2, $3) RETURNING id
+                """, uid, trainer_name, text)
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error("Failed to stage trainer message: %s", e)
+
+    # Acknowledge to trainer
+    await update.message.reply_text(
+        f"✅ Thanks {trainer_name}! Your update has been received and is pending review.",
+    )
+
+    # Notify operator
+    preview = text[:300] + ("…" if len(text) > 300 else "")
+    id_str = f" (ID: `{staged_id}`)" if staged_id else ""
+    try:
+        await context.bot.send_message(
+            chat_id=OPERATOR_CHAT_ID,
+            text=(
+                f"📥 *New knowledge update from {_escape_md(trainer_name)}*{_escape_md(id_str) if staged_id else ''}\n\n"
+                f"_{_escape_md(preview)}_\n\n"
+                f"Use `/approve {staged_id}` to add to ChromaDB\n"
+                f"Use `/reject {staged_id}` to discard"
+            ),
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error("Failed to notify operator of trainer message: %s", e)
+
+
+@operator_only
+async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Approve a staged knowledge update and add it to ChromaDB."""
+    parts = (update.message.text or "").split(None, 1)
+    if len(parts) < 2 or not parts[1].strip().isdigit():
+        await update.message.reply_text("Usage: `/approve <id>`", parse_mode="Markdown")
+        return
+
+    staged_id = int(parts[1].strip())
+
+    if not DATABASE_URL:
+        await update.message.reply_text("❌ Database not configured.")
+        return
+
+    try:
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            row = await conn.fetchrow(
+                "SELECT * FROM staged_knowledge WHERE id = $1 AND status = 'pending'",
+                staged_id
+            )
+            if not row:
+                await update.message.reply_text(f"❌ No pending update with ID `{staged_id}`.", parse_mode="Markdown")
+                return
+
+            content = row["content"]
+            trainer_name = row["trainer_name"] or "trainer"
+
+            # Add to ChromaDB
+            kb = _get_knowledge_base()
+            chunk_id = f"trainer::{row['trainer_id']}::staged::{staged_id}"
+            await asyncio.to_thread(
+                kb.collection.add,
+                ids=[chunk_id],
+                documents=[content],
+                metadatas=[{
+                    "source_type": "trainer_update",
+                    "trainer_id": str(row["trainer_id"]),
+                    "trainer_name": trainer_name,
+                    "staged_id": staged_id,
+                    "filename": f"trainer_{trainer_name}.txt",
+                    "chunk_index": 1,
+                }],
+            )
+
+            # Mark as approved
+            await conn.execute(
+                "UPDATE staged_knowledge SET status = 'approved', reviewed_at = NOW(), reviewed_by = $1 WHERE id = $2",
+                update.effective_user.id, staged_id
+            )
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error("Approve failed: %s", e)
+        await update.message.reply_text(f"❌ Error: `{_escape_md(type(e).__name__)}`", parse_mode="Markdown")
+        return
+
+    await update.message.reply_text(
+        f"✅ Update `{staged_id}` approved and added to ChromaDB.\n"
+        f"_{_escape_md(content[:200])}_",
+        parse_mode="Markdown",
+    )
+
+
+@operator_only
+async def cmd_reject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reject and discard a staged knowledge update."""
+    parts = (update.message.text or "").split(None, 1)
+    if len(parts) < 2 or not parts[1].strip().isdigit():
+        await update.message.reply_text("Usage: `/reject <id>`", parse_mode="Markdown")
+        return
+
+    staged_id = int(parts[1].strip())
+
+    if not DATABASE_URL:
+        await update.message.reply_text("❌ Database not configured.")
+        return
+
+    try:
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            result = await conn.execute(
+                "UPDATE staged_knowledge SET status = 'rejected', reviewed_at = NOW(), reviewed_by = $1 WHERE id = $2 AND status = 'pending'",
+                update.effective_user.id, staged_id
+            )
+            if result == "UPDATE 0":
+                await update.message.reply_text(f"❌ No pending update with ID `{staged_id}`.", parse_mode="Markdown")
+                return
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error("Reject failed: %s", e)
+        await update.message.reply_text(f"❌ Error: `{_escape_md(type(e).__name__)}`", parse_mode="Markdown")
+        return
+
+    await update.message.reply_text(f"🗑️ Update `{staged_id}` rejected and discarded.", parse_mode="Markdown")
+
+
+# ─────────────────────────────────────────────────────────────────
 # Global error handler
 # ─────────────────────────────────────────────────────────────────
 
@@ -829,6 +1012,11 @@ def main() -> None:
     app.add_handler(CommandHandler("note", cmd_note))
     app.add_handler(CommandHandler("lesson", cmd_lesson))
     app.add_handler(CommandHandler("notes", cmd_notes))
+
+    # Knowledge staging — trainer free-text + operator approval
+    app.add_handler(CommandHandler("approve", cmd_approve))
+    app.add_handler(CommandHandler("reject", cmd_reject))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_trainer_message))
 
     # Unknown commands fallback — must be registered last
     app.add_handler(MessageHandler(filters.COMMAND, cmd_unknown))
